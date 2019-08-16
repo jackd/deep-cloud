@@ -13,7 +13,7 @@ from deep_cloud.functions.augment import augment_cloud
 from keras_config.schedules import ClippedExponentialDecay
 from keras_config.session_options import SessionOptions
 
-SessionOptions(visible_devices='').configure_session()
+SessionOptions().configure_session()
 
 BATCH_SIZE = 32
 EPOCHS = 250
