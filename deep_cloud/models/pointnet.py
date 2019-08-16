@@ -87,7 +87,7 @@ def feature_transform_net(features,
     delta = layers.Dense(num_dims**2,
                          kernel_initializer=tf.keras.initializers.zeros(),
                          bias_initializer=tf.keras.initializers.constant(
-                             np.eye(3).flatten()))(x)
+                             np.eye(num_dims).flatten()))(x)
     delta = layers.Reshape((num_dims,) * 2)(delta)
 
     delta = layers.Lambda(add_identity,
