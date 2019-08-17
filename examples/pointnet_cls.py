@@ -44,7 +44,7 @@ optimizer = tf.keras.optimizers.Adam(learning_rate=ClippedExponentialDecay(
     min_value=1e-5,
     staircase=True))
 
-chkpt_dir = '~/deep_cloud_models/pointnet_cls/base'
+chkpt_dir = '~/deep-cloud-models/pointnet-cls/base'
 trainer = Trainer(problem=problem,
                   train_pipeline=train_pipeline,
                   validation_pipeline=validation_pipeline,

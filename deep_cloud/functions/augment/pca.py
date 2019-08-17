@@ -4,7 +4,7 @@ from __future__ import print_function
 import tensorflow as tf
 
 
-def get_pca_xy_angle(positions, rotation_axis=2):
+def get_pca_xy_angle(positions, rotation_dim=2):
     from sklearn.decomposition import PCA
 
     def get_pca(xy):
@@ -14,7 +14,7 @@ def get_pca_xy_angle(positions, rotation_axis=2):
         pca_vec = tf.squeeze(pca.components_, axis=0)
         return pca_vec
 
-    shift = 2 - rotation_axis
+    shift = 2 - rotation_dim
     if shift != 0:
         positions = tf.roll(positions, shift, axis=-1)
 
