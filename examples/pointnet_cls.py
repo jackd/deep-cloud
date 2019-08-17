@@ -19,25 +19,30 @@ BATCH_SIZE = 32
 EPOCHS = 250
 
 problem = modelnet.ModelnetProblem()
-train_pipeline = Pipeline(batch_size=BATCH_SIZE,
-                          repeats=None,
-                          shuffle_buffer=problem.examples_per_epoch('train'),
-                          map_fn=functools.partial(augment_cloud,
-                                                   rotate_scheme='random',
-                                                   jitter_stddev=2e-2,
-                                                   jitter_clip=5e-2))
+train_pipeline = Pipeline(
+    batch_size=BATCH_SIZE,
+    repeats=None,
+    shuffle_buffer=problem.examples_per_epoch('train'),
+    map_fn=functools.partial(
+        augment_cloud,
+        rotate_scheme='random',
+        jitter_stddev=2e-2,
+        #    jitter_clip=5e-2,
+    ))
 validation_pipeline = Pipeline(
     batch_size=BATCH_SIZE,
     repeats=None,
     shuffle_buffer=problem.examples_per_epoch('validation'),
     map_fn=functools.partial(augment_cloud, rotate_scheme='none'))
 
-optimizer = tf.keras.optimizers.Adam(
-    learning_rate=ClippedExponentialDecay(1e-3,
-                                          decay_steps=200000 / BATCH_SIZE,
-                                          decay_rate=0.7,
-                                          min_value=1e-5,
-                                          staircase=True))
+optimizer = tf.keras.optimizers.Adam(learning_rate=ClippedExponentialDecay(
+    1e-3,
+    decay_steps=20 * problem.examples_per_epoch('train') / BATCH_SIZE,
+    decay_rate=0.5,
+    #   decay_steps=200000 / BATCH_SIZE,
+    #   decay_rate=0.7,
+    min_value=1e-5,
+    staircase=True))
 
 chkpt_dir = '~/deep_cloud_models/pointnet_cls/base'
 trainer = Trainer(problem=problem,

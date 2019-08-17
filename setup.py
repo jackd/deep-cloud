@@ -11,7 +11,7 @@ with open('requirements.txt') as fp:
 setup(
     name='deep-cloud',
     version='0.0.1',
-    description=('Reimplementation of point cloud models in tensorflow'),
+    description='Implementation of point cloud models in tensorflow',
     url='http://github.com/jackd/deep-cloud',
     author='Dominic Jack',
     author_email='thedomjack@gmail.com',

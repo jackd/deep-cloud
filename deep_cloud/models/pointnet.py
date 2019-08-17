@@ -48,6 +48,38 @@ def add_identity(x, num_dims=None):
     return x + tf.eye(num_dims, dtype=x.dtype)
 
 
+class NonorthogonalRegularizer(tf.keras.regularizers.Regularizer):
+
+    def __init__(self, l1=0, l2=0):
+        self.l1 = l1
+        self.l2 = l2
+
+    def __call__(self, transform):
+        # NOTE: compared to original, we compute A.T @ A, rather than A @ A.T
+        # this is because the transformation is used like points @ A, which
+        # is equivalent to (A.T @ points.T).T
+        # TL;DR: this is equivalent to what is written in the paper, but not
+        # the author's code.
+        x = tf.matmul(transform, transform, transpose_a=True)
+        # the line below is equivalent to the authors code.
+        # x = tf.matmul(transform, transform, transpose_b=True)
+        x = tf.eye(tf.shape(x)[-1], dtype=x.dtype) - x
+        terms = []
+
+        def reduce(err):
+            return tf.reduce_mean(tf.reduce_sum(err, axis=(-2, -1)))
+
+        if self.l1:
+            terms.append(self.l1 * reduce(tf.abs(x)))
+        if self.l2:
+            terms.append(self.l2 * reduce(tf.square(x)))
+
+        return tf.add_n(terms)
+
+    def get_config(self):
+        return dict(l1=self.l1, l2=self.l2)
+
+
 def feature_transform_net(features,
                           num_dims,
                           training=None,
@@ -57,7 +89,8 @@ def feature_transform_net(features,
                           global_activation='relu',
                           local_units=(64, 128, 1024),
                           global_units=(512, 256),
-                          reduction=tf.reduce_max):
+                          reduction=tf.reduce_max,
+                          transform_reg_weight=0):
     """
     Feature transform network.
 
@@ -90,20 +123,19 @@ def feature_transform_net(features,
                              np.eye(num_dims).flatten()))(x)
     delta = layers.Reshape((num_dims,) * 2)(delta)
 
-    delta = layers.Lambda(add_identity,
-                          arguments=dict(num_dims=num_dims))(delta)  # TF-COMPAT
-    return delta
+    kwargs = {}
+    if transform_reg_weight:
+        kwargs['activity_regularizer'] = NonorthogonalRegularizer(
+            l2=transform_reg_weight)
+    transform = layers.Lambda(add_identity,
+                              arguments=dict(num_dims=num_dims),
+                              **kwargs)(delta)  # TF-COMPAT
+    return transform
 
 
 def apply_transform(args):
     cloud, matrix = args
     return tf.matmul(cloud, matrix)
-
-
-def _divide_by_batch_size(args):  # TF-COMPAT
-    value, value_with_batch_dim = args
-    batch_size = tf.shape(value_with_batch_dim)[0]
-    return value / tf.cast(batch_size, value.dtype)
 
 
 def pointnet_classifier(
@@ -117,7 +149,7 @@ def pointnet_classifier(
         units0=(64, 64),
         units1=(64, 128, 1024),
         global_units=(512, 256),
-        transform_reg_weight=0.0005 * 32,  # account for averaging
+        transform_reg_weight=0.001 / 2 * 32,  # account for averaging
 ):
     """
     Get a pointnet classifier.
@@ -137,11 +169,11 @@ def pointnet_classifier(
         units0: units in initial local mlp network.
         units1: units in second local mlp network.
         global_units: units in global mlp network.
-        transform_reg_weight: weight used in l2 regularizer. Note this should
-            be half the weight of the corresponding code in the original
-            implementation since we used keras, which does not half the squared
-            norm. We also take the mean over the batch dimension, hence the
-            factor of 32 in the default value compared to the original paper.
+        transform_reg_weight: weight used in l2 regularizer. Note we use the
+            sum of squared differences over the matrix dimensions, averaged over
+            the batch dimension. The original paper uses the tf.nn.l2_loss
+            (which has a factor of a half in there) and no batch-dimension
+            averaging, hence the odd default value.
 
     Returns:
         keras model with logits as outputs and list of necessary callbacks.
@@ -166,7 +198,11 @@ def pointnet_classifier(
     cloud = layers.Lambda(apply_transform)([cloud, transform0])  # TF-COMPAT
     cloud = mlp(cloud, units0, training=training, **bn_kwargs)
 
-    transform1 = feature_transform_net(cloud, units0[-1], **bn_kwargs)
+    transform1 = feature_transform_net(
+        cloud,
+        units0[-1],
+        transform_reg_weight=transform_reg_weight,
+        **bn_kwargs)
     cloud = layers.Lambda(apply_transform)([cloud, transform1])  # TF-COMPAT
 
     cloud = mlp(cloud, units1, training=training, **bn_kwargs)
@@ -182,14 +218,5 @@ def pointnet_classifier(
 
     model = tf.keras.models.Model(inputs=tf.nest.flatten(inputs),
                                   outputs=logits)
-
-    if transform_reg_weight:
-        regularizer = tf.keras.regularizers.l2(transform_reg_weight)
-        for transform in (transform1,):
-            reg_loss = tf.keras.layers.Lambda(regularizer)(
-                layers.Lambda(transform_diff)(transform))
-            mean_reg_loss = tf.keras.layers.Lambda(_divide_by_batch_size)(
-                [reg_loss, transform])
-            model.add_loss(mean_reg_loss)  # TF-COMPAT
 
     return model, callbacks
