@@ -96,7 +96,7 @@ def rotate_by_scheme(positions, normals=None, scheme='random', rotation_dim=2):
     if scheme == 'none':
         angle = 0
     elif scheme == 'pca-xy':
-        from pointnet.augment import pca
+        from deep_cloud.functions.augment import pca
         angle = pca.get_pca_xy_angle(positions, rotation_dim=rotation_dim)
     elif scheme == 'random':
         angle = tf.random.uniform(shape=(), dtype=positions.dtype) * (2 * np.pi)
