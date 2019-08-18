@@ -1,0 +1,11 @@
+# configuration from code without jitter
+pointnet_classifier.transform_reg_weight = 0.016  # 0.001 / 2 * 32
+learning_rate.decay_rate = 0.7
+
+train/augment_params.jitter_stddev = None
+train/augment_params.jitter_clip = None
+train/augment_params.maybe_reflect_x = True
+
+augment_params.rotate_scheme = 'pca-xy'
+
+chkpt_dir.name = 'pcar_no-jitter'

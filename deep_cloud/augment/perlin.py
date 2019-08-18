@@ -9,7 +9,39 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow as tf
-from deep_cloud.functions.augment.util import interp
+from more_keras.ops import interp
+
+
+def dot_grid(coords, corner_coords, gradients):
+    """
+    Args:
+        coords: (num_points, num_dims) point coordinates
+        corner_coords: (num_points, 2**num_dims, num_dims) int coordinates of corners
+        gradients: (nx, ny, ..., num_dims) gradients used in perlin noise
+
+    Returns:
+        (num_points, 2**num_dims) float of dot products
+    """
+    diff = (tf.expand_dims(coords, axis=-2) -
+            tf.cast(corner_coords, coords.dtype))
+    grads = tf.gather_nd(gradients, corner_coords)
+    # num_points, 2**num_dims, num_dims
+    return tf.reduce_sum(grads * diff, axis=-1)
+
+
+def perlin_interp(grid_values, coords):
+    """
+    Args:
+        grid_values: (nx, ny, ..., num_dims) gradients at grid coordinates
+        coords: (num_points, num_dims)
+            coordinates in range ([0, nx], [0, ny], ...)
+
+    Returns:
+        (num_points,) perlin-interpolated grid values.
+    """
+    corner_coords, factors = interp.get_linear_coords_and_factors(coords)
+    values = dot_grid(coords, corner_coords, grid_values)
+    return tf.reduce_sum(values * factors, axis=-1)
 
 
 def scale_to_grid(coords, grid_shape, eps=1e-5):
@@ -54,7 +86,7 @@ def add_perlin_noise(coords,
     for _ in range(num_dims):
         gradients = tf.random.normal(shape=grid_shape + (num_dims,),
                                      stddev=stddev)
-        shifts.append(interp.perlin_interp(gradients, coords))
+        shifts.append(perlin_interp(gradients, coords))
     coords = coords + tf.stack(shifts, axis=-1)
     if rescale:
         coords = rescale_fn(coords)

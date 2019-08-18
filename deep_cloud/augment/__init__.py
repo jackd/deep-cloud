@@ -4,14 +4,14 @@ from __future__ import print_function
 
 import functools
 import tensorflow as tf
-from deep_cloud.functions.augment.ffd import random_ffd
-from deep_cloud.functions.augment.jitter import jitter_positions
-from deep_cloud.functions.augment.jitter import jitter_normals
-from deep_cloud.functions.augment.perlin import add_perlin_noise
-from deep_cloud.functions.augment.rigid import random_rigid_transform
-from deep_cloud.functions.augment.rigid import random_scale
-from deep_cloud.functions.augment.rigid import rotate_by_scheme
-from deep_cloud.functions.augment.rigid import maybe_reflect
+from deep_cloud.augment.ffd import random_ffd
+from deep_cloud.augment.jitter import jitter_positions
+from deep_cloud.augment.jitter import jitter_normals
+from deep_cloud.augment.perlin import add_perlin_noise
+from deep_cloud.augment.rigid import random_rigid_transform
+from deep_cloud.augment.rigid import random_scale
+from deep_cloud.augment.rigid import rotate_by_scheme
+from deep_cloud.augment.rigid import maybe_reflect
 
 
 def augment_cloud(

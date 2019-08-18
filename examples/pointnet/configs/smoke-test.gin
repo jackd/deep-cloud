@@ -1,0 +1,6 @@
+train.batch_size = 2
+train.epochs = 2
+train.train_steps = 5
+train.validation_steps = 3
+
+chkpt_dir.name = 'smoke-test'

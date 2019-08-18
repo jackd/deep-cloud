@@ -5,10 +5,9 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import functools
-from keras_config.layers import VariableMomentumBatchNormalization
-from keras_config.callbacks import BatchNormMomentumScheduler
-from keras_config import functions
-from deep_cloud.functions.decay import complementary_exponential_decay
+from more_keras import callbacks as cb
+from more_keras.layers import VariableMomentumBatchNormalization
+from more_keras.schedules import exponential_decay_towards
 import six
 layers = tf.keras.layers
 
@@ -172,7 +171,7 @@ def pointnet_classifier(
         transform_reg_weight: weight used in l2 regularizer. Note we use the
             sum of squared differences over the matrix dimensions, averaged over
             the batch dimension. The original paper uses the tf.nn.l2_loss
-            (which has a factor of a half in there) and no batch-dimension
+            (which includes a factor of a half) and no batch-dimension
             averaging, hence the odd default value.
 
     Returns:
@@ -180,15 +179,16 @@ def pointnet_classifier(
     """
     inputs = tf.keras.layers.Input(shape=input_spec.shape,
                                    dtype=input_spec.dtype)
-    reduction = functions.get(reduction)
-    if isinstance(batch_norm_momentum, dict):
-        batch_norm_momentum = functions.get(batch_norm_momentum)
-
-    callbacks = []
     if use_batch_norm and callable(batch_norm_momentum):
-        bn_fn = batch_norm_momentum
         batch_norm_momentum = 0.99  # initial momentum - irrelevant?
-        callbacks.append(BatchNormMomentumScheduler(bn_fn))
+        cb.aggregator.append(
+            cb.ScheduleUpdater(
+                schedule=batch_norm_momentum,
+                variables_func=lambda model: [
+                    l.momentum
+                    for l in model.layers
+                    if isinstance(l, VariableMomentumBatchNormalization)
+                ]))
 
     bn_kwargs = dict(use_batch_norm=use_batch_norm,
                      batch_norm_momentum=batch_norm_momentum)
@@ -219,4 +219,4 @@ def pointnet_classifier(
     model = tf.keras.models.Model(inputs=tf.nest.flatten(inputs),
                                   outputs=logits)
 
-    return model, callbacks
+    return model

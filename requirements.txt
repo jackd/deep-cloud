@@ -1,4 +1,4 @@
 git+git://github.com/jackd/shape-tfds.git@master
-git+git://github.com/jackd/keras-config.git@master
+git+git://github.com/jackd/more-keras.git@master
 ray
 pandas

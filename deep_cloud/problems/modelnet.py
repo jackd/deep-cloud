@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import functools
 import tensorflow as tf
-from keras_config import problems
+from more_keras.framework.problems.tfds import TfdsProblem
 from shape_tfds.shape import modelnet
 
 FULL = 'FULL'
@@ -16,8 +16,6 @@ def _base_modelnet_map(inputs,
                        num_points=None,
                        random_points=False,
                        up_dim=2):
-    if not positions_only:
-        raise NotImplementedError()
     if isinstance(inputs, dict):
         positions = inputs['positions']
         normals = None if positions_only else inputs['normals']
@@ -55,8 +53,7 @@ def _base_modelnet_map(inputs,
     return inputs, labels
 
 
-@problems.register
-class ModelnetProblem(problems.TfdsProblem):
+class ModelnetProblem(TfdsProblem):
 
     def __init__(
             self,
@@ -126,7 +123,6 @@ class ModelnetProblem(problems.TfdsProblem):
         return config
 
 
-@problems.register
 class SampledModelnetProblem(ModelnetProblem):
 
     def __init__(self, num_points_base=2048, num_classes=40, **kwargs):
