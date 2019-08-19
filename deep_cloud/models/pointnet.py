@@ -16,11 +16,6 @@ def value(dim):
     return getattr(dim, 'value', dim)  # TF-COMPAT
 
 
-def transform_diff(transform):
-    return (tf.matmul(transform, transform, transpose_b=True) -
-            tf.eye(value(transform.shape[-1])))  # TF-COMPAT
-
-
 def mlp(x,
         units,
         training=None,
@@ -49,7 +44,7 @@ class NonorthogonalRegularizer(tf.keras.regularizers.Regularizer):
 
     def __call__(self, transform):
         x = tf.matmul(transform, transform, transpose_b=True)
-        x = tf.eye(x.shape[-1], dtype=x.dtype) - x
+        x = tf.eye(value(x.shape[-1]), dtype=x.dtype) - x
         terms = []
 
         if self.l1:
