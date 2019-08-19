@@ -1,11 +1,6 @@
-# configuration from code without jitter
-pointnet_classifier.transform_reg_weight = 0.016  # 0.001 / 2 * 32
-learning_rate.decay_rate = 0.7
+include 'configs/code.gin'
+include 'configs/tweaks/pcar.gin'
 
-train/augment_params.jitter_stddev = 1e-2
-train/augment_params.jitter_clip = None
-train/augment_params.maybe_reflect_x = True
+train/augment_cloud.jitter_stddev = 1e-2
 
-augment_params.rotate_scheme = 'pca-xy'
-
-chkpt_dir.name = 'pcar_j1e-2'
+model_dir = 'models/pcar_j1e-2'

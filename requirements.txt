@@ -1,4 +1,7 @@
-git+git://github.com/jackd/shape-tfds.git@master
-git+git://github.com/jackd/more-keras.git@master
+absl
+tensorflow_datasets
+gin-config
 ray
 pandas
+git+git://github.com/jackd/shape-tfds.git@master
+git+git://github.com/jackd/more-keras.git@master

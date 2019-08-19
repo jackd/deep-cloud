@@ -3,8 +3,8 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-from tensorflow.python.framework import test_util
-from weighpoint.ops import cloud
+from tensorflow.python.framework import test_util  # pylint: disable=no-name-in-module
+from deep_cloud.ops import cloud
 
 
 def get_single_rel_coords_data():
@@ -27,19 +27,18 @@ def get_single_rel_coords_data():
 
 @test_util.run_all_in_graph_and_eager_modes
 class CloudTest(tf.test.TestCase):
+
     def test_single_rel_coords(self):
         with tf.device('/cpu:0'):
             in_coords, out_coords, indices, expected = \
                 get_single_rel_coords_data()
-            rel_coords = cloud.get_relative_coords(
-                in_coords, out_coords, indices)
+            rel_coords = cloud.get_relative_coords(in_coords, out_coords,
+                                                   indices)
 
-        self.assertAllEqual(
-            self.evaluate(rel_coords.values),
-            self.evaluate(expected.values))
-        self.assertAllEqual(
-            self.evaluate(rel_coords.row_splits),
-            self.evaluate(expected.row_splits))
+        self.assertAllEqual(self.evaluate(rel_coords.values),
+                            self.evaluate(expected.values))
+        self.assertAllEqual(self.evaluate(rel_coords.row_splits),
+                            self.evaluate(expected.row_splits))
 
 
 if __name__ == '__main__':

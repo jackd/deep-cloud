@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import functools
+import gin
 import tensorflow as tf
 from deep_cloud.augment.ffd import random_ffd
 from deep_cloud.augment.jitter import jitter_positions
@@ -14,6 +15,7 @@ from deep_cloud.augment.rigid import rotate_by_scheme
 from deep_cloud.augment.rigid import maybe_reflect
 
 
+@gin.configurable(blacklist=['inputs', 'labels'])
 def augment_cloud(
         inputs,
         labels,

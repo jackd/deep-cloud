@@ -1,6 +1,9 @@
-train.batch_size = 2
-train.epochs = 2
+include 'configs/code.gin'
+
+Pipeline.batch_size = 2
+
+epochs = 2
 train.train_steps = 5
 train.validation_steps = 3
 
-chkpt_dir.name = 'smoke-test'
+model_dir = 'models/smoke-test'

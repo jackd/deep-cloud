@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import functools
+import gin
 import tensorflow as tf
 from more_keras.framework.problems.tfds import TfdsProblem
 from shape_tfds.shape import modelnet
@@ -53,6 +54,7 @@ def _base_modelnet_map(inputs,
     return inputs, labels
 
 
+@gin.configurable
 class ModelnetProblem(TfdsProblem):
 
     def __init__(
@@ -123,6 +125,7 @@ class ModelnetProblem(TfdsProblem):
         return config
 
 
+@gin.configurable
 class SampledModelnetProblem(ModelnetProblem):
 
     def __init__(self, num_points_base=2048, num_classes=40, **kwargs):

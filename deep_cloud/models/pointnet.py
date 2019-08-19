@@ -5,15 +5,13 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import functools
+import gin
 from more_keras import callbacks as cb
 from more_keras.layers import VariableMomentumBatchNormalization
 from more_keras.schedules import exponential_decay_towards
+from more_keras.tf_compat import dim_value
 import six
 layers = tf.keras.layers
-
-
-def value(dim):
-    return getattr(dim, 'value', dim)  # TF-COMPAT
 
 
 def mlp(x,
@@ -44,7 +42,7 @@ class NonorthogonalRegularizer(tf.keras.regularizers.Regularizer):
 
     def __call__(self, transform):
         x = tf.matmul(transform, transform, transpose_b=True)
-        x = tf.eye(value(x.shape[-1]), dtype=x.dtype) - x
+        x = tf.eye(dim_value(x.shape[-1]), dtype=x.dtype) - x
         terms = []
 
         if self.l1:
@@ -113,6 +111,7 @@ def apply_transform(args, transpose_b=False):
     return tf.matmul(cloud, matrix, transpose_b=transpose_b)
 
 
+@gin.configurable(blacklist=['input_spec', 'output_spec'])
 def pointnet_classifier(
         input_spec,
         output_spec,
