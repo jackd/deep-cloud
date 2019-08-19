@@ -48,24 +48,14 @@ class NonorthogonalRegularizer(tf.keras.regularizers.Regularizer):
         self.l2 = l2
 
     def __call__(self, transform):
-        # NOTE: compared to original, we compute A.T @ A, rather than A @ A.T
-        # this is because the transformation is used like points @ A, which
-        # is equivalent to (A.T @ points.T).T
-        # TL;DR: this is equivalent to what is written in the paper, but not
-        # the author's code.
-        x = tf.matmul(transform, transform, transpose_a=True)
-        # the line below is equivalent to the authors code.
-        # x = tf.matmul(transform, transform, transpose_b=True)
-        x = tf.eye(tf.shape(x)[-1], dtype=x.dtype) - x
+        x = tf.matmul(transform, transform, transpose_b=True)
+        x = tf.eye(x.shape[-1], dtype=x.dtype) - x
         terms = []
 
-        def mean_sum(err):
-            return tf.reduce_mean(tf.reduce_sum(err, axis=(-2, -1)))
-
         if self.l1:
-            terms.append(self.l1 * mean_sum(tf.abs(x)))
+            terms.append(self.l1 * tf.reduce_sum(tf.abs(x)))
         if self.l2:
-            terms.append(self.l2 * mean_sum(tf.square(x)))
+            terms.append(self.l2 * tf.reduce_sum(tf.square(x)))
 
         return tf.add_n(terms)
 
@@ -123,9 +113,9 @@ def feature_transform_net(features,
     return transform
 
 
-def apply_transform(args):
+def apply_transform(args, transpose_b=False):
     cloud, matrix = args
-    return tf.matmul(cloud, matrix)
+    return tf.matmul(cloud, matrix, transpose_b=transpose_b)
 
 
 def pointnet_classifier(
@@ -140,6 +130,7 @@ def pointnet_classifier(
         units1=(64, 128, 1024),
         global_units=(512, 256),
         transform_reg_weight=0.001 / 2 * 32,  # account for averaging
+        transpose_transform=False,
 ):
     """
     Get a pointnet classifier.
@@ -164,10 +155,18 @@ def pointnet_classifier(
             the batch dimension. The original paper uses the tf.nn.l2_loss
             (which includes a factor of a half) and no batch-dimension
             averaging, hence the odd default value.
+        transpose_transform:
+            False: what the pointnet paper describes, x' = x @ A.T
+                (equivalent to x'.T = A @ x.T)
+            True: what the pointnet code implements, x' = x @ A
+                (equivalent to x'.T = A.T @ x.T)
+            This is significant in the case where there is regularization
+            weight, since |I - A.T @ A| != |I - A @ A.T|.
 
     Returns:
         keras model with logits as outputs and list of necessary callbacks.
     """
+    transform_kwargs = dict(transpose_b=not transpose_transform)
     inputs = tf.keras.layers.Input(shape=input_spec.shape,
                                    dtype=input_spec.dtype)
     if use_batch_norm and callable(batch_norm_momentum):
@@ -186,7 +185,9 @@ def pointnet_classifier(
     num_classes = output_spec.shape[-1]
     cloud = inputs
     transform0 = feature_transform_net(cloud, 3, training=training, **bn_kwargs)
-    cloud = layers.Lambda(apply_transform)([cloud, transform0])  # TF-COMPAT
+    cloud = layers.Lambda(apply_transform,
+                          arguments=transform_kwargs)([cloud,
+                                                       transform0])  # TF-COMPAT
     cloud = mlp(cloud, units0, training=training, **bn_kwargs)
 
     transform1 = feature_transform_net(
@@ -194,7 +195,9 @@ def pointnet_classifier(
         units0[-1],
         transform_reg_weight=transform_reg_weight,
         **bn_kwargs)
-    cloud = layers.Lambda(apply_transform)([cloud, transform1])  # TF-COMPAT
+    cloud = layers.Lambda(apply_transform,
+                          arguments=transform_kwargs)([cloud,
+                                                       transform1])  # TF-COMPAT
 
     cloud = mlp(cloud, units1, training=training, **bn_kwargs)
 

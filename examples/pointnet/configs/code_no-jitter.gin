@@ -1,5 +1,6 @@
 # configuration from code without jitter
 pointnet_classifier.transform_reg_weight = 0.016  # 0.001 / 2 * 32
+pointnet_classifier.transpose_transform = True
 learning_rate.decay_rate = 0.7
 
 train/augment_params.jitter_stddev = None
