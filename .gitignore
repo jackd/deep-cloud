@@ -6,3 +6,5 @@ __pycache__
 .benchmarks
 .pytest_cache
 tmp
+*.h5
+events*

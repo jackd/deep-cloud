@@ -115,7 +115,7 @@ def train(batch_size=32,
                     chkpt_dir=root_dir,
                     extra_callbacks=[
                         GinConfigSaver(
-                            os.path.join(root_dir, 'operative-config.gin'))
+                            os.path.join(root_dir, 'operative-config.gin')),
                     ],
                     train_steps=train_steps,
                     validation_steps=validation_steps)

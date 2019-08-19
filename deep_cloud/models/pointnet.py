@@ -41,12 +41,6 @@ def mlp(x,
     return x
 
 
-def add_identity(x, num_dims=None):
-    if num_dims is None:
-        num_dims = x.shape[-1]
-    return x + tf.eye(num_dims, dtype=x.dtype)
-
-
 class NonorthogonalRegularizer(tf.keras.regularizers.Regularizer):
 
     def __init__(self, l1=0, l2=0):
@@ -65,13 +59,13 @@ class NonorthogonalRegularizer(tf.keras.regularizers.Regularizer):
         x = tf.eye(tf.shape(x)[-1], dtype=x.dtype) - x
         terms = []
 
-        def reduce(err):
+        def mean_sum(err):
             return tf.reduce_mean(tf.reduce_sum(err, axis=(-2, -1)))
 
         if self.l1:
-            terms.append(self.l1 * reduce(tf.abs(x)))
+            terms.append(self.l1 * mean_sum(tf.abs(x)))
         if self.l2:
-            terms.append(self.l2 * reduce(tf.square(x)))
+            terms.append(self.l2 * mean_sum(tf.square(x)))
 
         return tf.add_n(terms)
 
@@ -116,19 +110,16 @@ def feature_transform_net(features,
             use_batch_norm=use_batch_norm,
             batch_norm_momentum=batch_norm_momentum)
 
-    delta = layers.Dense(num_dims**2,
-                         kernel_initializer=tf.keras.initializers.zeros(),
-                         bias_initializer=tf.keras.initializers.constant(
-                             np.eye(num_dims).flatten()))(x)
-    delta = layers.Reshape((num_dims,) * 2)(delta)
+    transform = layers.Dense(num_dims**2,
+                             kernel_initializer=tf.keras.initializers.zeros(),
+                             bias_initializer=tf.keras.initializers.constant(
+                                 np.eye(num_dims).flatten()))(x)
 
     kwargs = {}
     if transform_reg_weight:
         kwargs['activity_regularizer'] = NonorthogonalRegularizer(
             l2=transform_reg_weight)
-    transform = layers.Lambda(add_identity,
-                              arguments=dict(num_dims=num_dims),
-                              **kwargs)(delta)  # TF-COMPAT
+    transform = layers.Reshape((num_dims,) * 2, **kwargs)(transform)
     return transform
 
 
