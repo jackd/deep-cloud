@@ -8,7 +8,9 @@ import numpy as np
 import tensorflow as tf
 from more_keras.layers import utils
 from more_keras.layers import source
+from more_keras.layers import Dense
 from more_keras.meta_models import builder as b
+from more_keras.callbacks import cache
 
 from deep_cloud import neigh as n
 from deep_cloud.layers import sample
@@ -40,9 +42,9 @@ def cls_tail(features,
     else:
         features = activation(features)
     for u in hidden_units:
-        features = tf.keras.layers.Dense(u, activation=None)(features)
+        features = Dense(u, activation=None)(features)
         features = activation(features)
-    logits = tf.keras.layers.Dense(num_classes, activation=None)(features)
+    logits = Dense(num_classes, activation=None)(features)
     return logits
 
 
@@ -101,13 +103,14 @@ def cls_head(coords,
 
     def maybe_feed(r2):
         if isinstance(r2, (tf.Tensor, tf.Variable)):
-            return b.prebatch_feed(tf.keras.layers.Lambda(tf.sqrt)(radius2))
+            r = tf.keras.layers.Lambda(tf.sqrt)(radius2)
+            return cache.get_cached(r)
         else:
             return np.sqrt(r2)
 
     features = b.as_batched_model_input(normals)
     for f in initial_filters:
-        layer = tf.keras.layers.Dense(f)
+        layer = Dense(f)
         features = tf.ragged.map_flat_values(layer, features)
         features = tf.ragged.map_flat_values(initial_activation, features)
 
@@ -155,10 +158,16 @@ def cls_head(coords,
     return features
 
 
-@gin.configurable(blacklist=['inputs', 'output_spec'])
-def cls_logits(inputs, output_spec, head_fn=cls_head, tail_fn=cls_tail):
+@gin.configurable(blacklist=['input_spec', 'output_spec'])
+def weighpoint_classifier(input_spec,
+                          output_spec,
+                          head_fn=cls_head,
+                          tail_fn=cls_tail):
+    inputs = tf.nest.map_structure(
+        lambda spec: b.prebatch_input(shape=spec.shape, dtype=spec.dtype),
+        input_spec)
     coords = inputs['positions']
     normals = inputs.get('normals')
     features = head_fn(coords, normals)
     logits = tail_fn(features, num_classes=output_spec.shape[-1])
-    return logits
+    return b.model((logits,))

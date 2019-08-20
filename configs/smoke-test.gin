@@ -1,0 +1,7 @@
+batch_size = 2
+train.epochs = 5
+train.train_steps = 7
+train.validation_steps = 5
+
+# fresh = True
+model_dir = '/tmp/deep-cloud/smoke-test'

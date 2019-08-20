@@ -98,12 +98,18 @@ class ModelnetProblem(TfdsProblem):
         self.num_parallel_calls = num_parallel_calls
         input_spec = tf.keras.layers.InputSpec(shape=(num_points, 3),
                                                dtype=tf.float32)
+        if not positions_only:
+            input_spec = dict(
+                positions=input_spec,
+                normals=input_spec,
+            )
         super(ModelnetProblem, self).__init__(
             builder=builder,
             loss=loss,
             metrics=metrics,
             objective=objective,
             input_spec=input_spec,
+            labels_spec=tf.keras.layers.InputSpec(shape=(), dtype=tf.int64),
             output_spec=None,
             as_supervised=True,
             split_map=split_map,

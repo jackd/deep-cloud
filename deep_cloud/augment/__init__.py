@@ -39,9 +39,6 @@ def augment_cloud(
         positions_only = True
         normals = None
 
-    if not positions_only:
-        raise NotImplementedError()
-
     if jitter_stddev is not None:
         positions = jitter_positions(positions,
                                      stddev=jitter_stddev,
@@ -55,7 +52,10 @@ def augment_cloud(
                                            stddev=rigid_transform_stddev)
 
     if maybe_reflect_x:
-        positions = maybe_reflect(positions)
+        if normals is None:
+            positions = maybe_reflect(positions)
+        else:
+            positions, normals = maybe_reflect((positions, normals))
 
     if perlin_grid_shape is not None:
         positions = add_perlin_noise(positions,

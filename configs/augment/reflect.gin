@@ -1,0 +1,3 @@
+import deep_cloud.augment
+
+train/augment_cloud.maybe_reflect_x = True

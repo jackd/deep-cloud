@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 from deep_cloud.ops.np_utils import tree_utils
 from more_keras.ragged.np_impl import RaggedArray
-from more_keras.np_utils import sample
+from deep_cloud.ops.np_utils import sample
 
 na = 50
 nb = 40

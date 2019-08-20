@@ -1,0 +1,7 @@
+import deep_cloud.augment
+
+augment_cloud.rotate_scheme = 'pca-xy'
+
+# the below is necessary in case they are specified elsewhere.
+train/augment_cloud.rotate_scheme = 'pca-xy'
+validation/augment_cloud.rotate_scheme = 'pca-xy'

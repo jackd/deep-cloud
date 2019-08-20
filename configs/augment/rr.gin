@@ -1,0 +1,4 @@
+import deep_cloud.augment
+
+train/augment_cloud.rotate_scheme = 'random'
+validation/augment_cloud.rotate_scheme = 'none'

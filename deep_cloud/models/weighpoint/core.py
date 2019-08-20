@@ -5,6 +5,9 @@ import os
 import gin
 import numpy as np
 import tensorflow as tf
+from more_keras.layers import Dense
+from more_keras.layers import BatchNormalization
+from more_keras.layers import Dropout
 from more_keras.layers import bias
 from more_keras.layers import utils
 from more_keras.layers import source
@@ -26,8 +29,7 @@ def mlp_layer(flat_features,
               units,
               activation='relu',
               use_batch_normalization=False,
-              dropout_rate=None,
-              init_kernel_scale=1.0):
+              dropout_rate=None):
     """
     Basic multi-layer perceptron layer + call.
 
@@ -37,19 +39,17 @@ def mlp_layer(flat_features,
         activation: used in Dense
         dropout_rate: rate used in dropout (no dropout if this is None)
         use_batch_normalization: applied after dropout if True
-        init_kernel_scale: scale used in kernel_initializer.
 
     Returns:
         [N, units] float32 output features
     """
-    flat_features = tf.keras.layers.Dense(
-        units, activation=activation,
-        use_bias=not use_batch_normalization)(flat_features)
+    flat_features = Dense(units,
+                          activation=activation,
+                          use_bias=not use_batch_normalization)(flat_features)
     if dropout_rate is not None:
-        flat_features = tf.keras.layers.Dropout(
-            rate=dropout_rate)(flat_features)
+        flat_features = Dropout(rate=dropout_rate)(flat_features)
     if use_batch_normalization:
-        flat_features = tf.keras.layers.BatchNormalization(
+        flat_features = BatchNormalization(
             scale=activation != 'relu')(flat_features)
     return flat_features
 
@@ -74,9 +74,9 @@ def generalized_activation(features,
     features = tf.keras.layers.Lambda(
         tf.keras.activations.get(activation))(features)
     if use_batch_normalization:
-        features = tf.keras.layers.BatchNormalization(features)
+        features = BatchNormalization()(features)
     if dropout_rate:
-        features = tf.keras.layers.Dropout(dropout_rate)(features)
+        features = Dropout(dropout_rate)(features)
     return features
 
 
@@ -228,7 +228,8 @@ def convolve(features,
     if global_features is not None:
         features = tf.RaggedTensor.from_row_splits(
             features, offset_batched_neighbors.row_splits)
-        features = add_local_global(features, global_features).flat_values
+        features = add_local_global(features, global_features)
+        features = features.flat_values
     return features, offset_batched_neighbors.nested_row_splits
 
 

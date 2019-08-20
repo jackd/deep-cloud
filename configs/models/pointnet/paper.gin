@@ -1,0 +1,11 @@
+include 'models/pointnet/code.gin'
+
+train/augment_cloud.jitter_stddev = 2e-2
+train/augment_cloud.jitter_clip = None
+
+ExponentialDecayTowards.decay_rate = 0.5
+
+pointnet_classifier.transform_reg_weight = 0.032  # 0.001 * 32
+pointnet_classifier.transpose_transform = False
+
+model_dir = '~/deep-cloud-models/pointnet/paper'

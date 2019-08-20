@@ -20,6 +20,7 @@ from __future__ import print_function
 import gin
 import tensorflow as tf
 from more_keras.meta_models import builder as b
+from more_keras.ops import polynomials as p
 from deep_cloud.layers.lde import get_log_dense_exp_features
 from deep_cloud.layers import ctg
 
@@ -73,7 +74,6 @@ def polynomial_transformer(max_order=3,
                            is_total_order=True,
                            base_builder=None,
                            scale_coords=False):
-    from more_keras.ops import polynomials as p
     layer = tf.keras.layers.Lambda(p.get_nd_polynomials,
                                    arguments=dict(max_order=max_order,
                                                   is_total_order=is_total_order,

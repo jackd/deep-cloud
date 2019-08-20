@@ -1,6 +1,0 @@
-include 'configs/code.gin'
-include 'configs/tweaks/pcar.gin'
-
-train/augment_cloud.jitter_stddev = 1e-2
-
-model_dir = 'models/pcar_j1e-2'

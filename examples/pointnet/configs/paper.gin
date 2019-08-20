@@ -1,9 +1,0 @@
-include 'configs/code.gin'
-
-more_keras.schedules.ExponentialDecayTowards.decay_rate = 0.5
-pointnet_classifier.transform_reg_weight = 0.032  # 0.001 * 32
-pointnet_classifier.transpose_transform = False
-train/augment_params.jitter_stddev = 2e-2
-train/augment_params.jitter_clip = None
-
-model_dir = 'models/paper.gin'

@@ -1,0 +1,22 @@
+import more_keras.schedules
+import more_keras.keras_configurables
+import deep_cloud.models.weighpoint.classifier
+import deep_cloud.problems.builders
+
+include 'problems/pointnet.gin'
+include 'augment/j1e-2.gin'
+
+ModelnetProblem.positions_only = False
+ModelnetProblem.builder = @uniform_density_pointnet()
+
+optimizer_fn = @Adam
+Adam.learning_rate = @ExponentialDecayTowards()
+
+ExponentialDecayTowards.initial_learning_rate = 1e-3
+ExponentialDecayTowards.clip_value = 1e-5
+ExponentialDecayTowards.decay_steps = 6250 # 20 epochs
+ExponentialDecayTowards.decay_rate = 0.7
+
+model_fn = @weighpoint_classifier
+
+model_dir = '~/deep-cloud-models/weighpoint/cls/base'

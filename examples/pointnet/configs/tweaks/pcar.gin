@@ -1,3 +1,0 @@
-train/augment_cloud.jitter_clip = None
-train/augment_cloud.maybe_reflect_x = True
-train/augment_cloud.rotate_scheme = 'pca-xy'

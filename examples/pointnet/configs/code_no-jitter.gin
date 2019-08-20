@@ -1,4 +1,0 @@
-include 'configs/code.gin'
-include 'configs/tweaks/no-jitter.gin'
-
-model_dir = 'models/code_no-jitter'

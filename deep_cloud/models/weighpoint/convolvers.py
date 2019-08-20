@@ -16,8 +16,9 @@ import abc
 import gin
 import six
 import tensorflow as tf
-from deep_cloud.layers import conv
+from more_keras.layers import Dense
 from more_keras.layers import utils
+from deep_cloud.layers import conv
 
 
 class Convolver(object):
@@ -113,7 +114,7 @@ class ExpandingConvolver(Convolver):
             batched_neighbors.nested_row_splits[-1],
             None if weights is None else weights.flat_values)
         if filters_out is not None:
-            features = tf.keras.layers.Dense(filters_out)(features)
+            features = Dense(filters_out)(features)
         if self._activation is not None:
             features = self._activation(features)
 
@@ -129,7 +130,7 @@ class ExpandingConvolver(Convolver):
             features, utils.flatten_leading_dims(coord_features, 2), None,
             row_splits)
         if filters_out is not None:
-            features = tf.keras.layers.Dense(filters_out)(features)
+            features = Dense(filters_out)(features)
         if self._global_activation is not None:
             features = self._global_activation(features)
         return features
@@ -140,7 +141,7 @@ class ExpandingConvolver(Convolver):
             global_features, utils.flatten_leading_dims(coord_features, 2),
             row_splits)
         if filters_out is not None:
-            features = tf.keras.layers.Dense(filters_out)(features)
+            features = Dense(filters_out)(features)
         if self._activation is not None:
             features = self._activation(features)
         return features
@@ -184,7 +185,7 @@ class ResnetConvolver(Convolver):
         shortcut = features
         if self._combine == 'add':
             if features.shape[-1] != x.shape[-1]:
-                shortcut = tf.keras.layers.Dense(filters_out)(shortcut)
+                shortcut = Dense(filters_out)(shortcut)
                 shortcut = tf.keras.layers.BatchNormalization()(shortcut)
             x = tf.keras.layers.Add()([x, shortcut])
             return tf.keras.layers.Activation(self._activation)(x)
@@ -270,9 +271,9 @@ def simple_mlp(x,
     hidden_activation = _activation(hidden_activation)
     final_activation = _activation(final_activation)
     for _ in range(n_hidden):
-        x = tf.keras.layers.Dense(filters_hidden)(x)
+        x = Dense(filters_hidden)(x)
         x = hidden_activation(x)
-    x = tf.keras.layers.Dense(filters_out)(x)
+    x = Dense(filters_out)(x)
     return final_activation(x)
 
 

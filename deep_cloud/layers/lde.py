@@ -5,6 +5,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 import numpy as np
+from more_keras.layers import Dense
 from more_keras.layers import utils as layer_utils
 from more_keras import constraints as c
 
@@ -37,11 +38,10 @@ def get_log_dense_exp_features(rel_coords,
             order_constraint = c.MaxValue(max_order)
         constraints.append(order_constraint)
     constraint = c.compound_constraint(*constraints)
-    dense = tf.keras.layers.Dense(
-        num_complex_features,
-        kernel_constraint=constraint,
-        kernel_initializer=tf.initializers.truncated_normal(mean=0.5,
-                                                            stddev=0.2))
+    dense = Dense(num_complex_features,
+                  kernel_constraint=constraint,
+                  kernel_initializer=tf.initializers.truncated_normal(
+                      mean=0.5, stddev=0.2))
 
     def f(inputs, min_log_value=-10):
         x = inputs
