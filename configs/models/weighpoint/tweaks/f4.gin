@@ -1,0 +1,3 @@
+# quadruple filters at each step, 16x total number of parameters
+cls_head.initial_filters = (64,)
+cls_head.filters = (128, 256, 512, 1024)

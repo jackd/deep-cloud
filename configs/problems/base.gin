@@ -1,0 +1,12 @@
+# Configuration of problem and pipelines used in the original pointnet implementation
+# Configures the following macros:
+# problem
+#
+# introduces: positions_only (default True)
+
+import deep_cloud.problems.modelnet
+import shape_tfds.shape.modelnet.pointnet
+problem = @ModelnetProblem()
+ModelnetProblem.positions_only = %positions_only
+
+positions_only = True

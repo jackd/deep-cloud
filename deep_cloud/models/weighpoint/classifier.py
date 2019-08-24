@@ -11,9 +11,11 @@ from more_keras.layers import source
 from more_keras.layers import Dense
 from more_keras.meta_models import builder as b
 from more_keras.callbacks import cache
+from more_keras.callbacks import tensorboard as tb
 
 from deep_cloud import neigh as n
 from deep_cloud.layers import sample
+from deep_cloud.layers import ctg
 from deep_cloud.models.weighpoint import core
 from deep_cloud.models.weighpoint import convolvers as c
 from deep_cloud.models.weighpoint import transformers as t
@@ -74,17 +76,13 @@ def cls_head(coords,
              coords_transform=None,
              weights_transform=None,
              convolver=None):
-
     if convolver is None:
         convolver = c.ExpandingConvolver(activation=cls_head_activation)
     if coords_transform is None:
-        coords_transform = t.polynomial_transformer()
+        coords_transform = t.polynomial_transformer(max_order=1)
     if weights_transform is None:
-
-        def weights_transform_(*args, **kwargs):
-            return None
-    else:
-        weights_transform_ = weights_transform
+        weights_transform = t.ctg_transformer()
+        # weights_transform = lambda *args, **kwargs: None
 
     n_res = len(filters)
     unscaled_radii2 = radii_fn(n_res)
@@ -95,16 +93,17 @@ def cls_head(coords,
         radii2 = tf.keras.layers.Lambda(tf.unstack,
                                         arguments=dict(axis=0))(radii2)
         for i, radius2 in enumerate(radii2):
-            tf.compat.v1.summary.scalar('r%d' % i,
-                                        tf.sqrt(radius2),
-                                        family='radii')
+            tb.add_custom_scalar('radius{}'.format(i), tf.sqrt(radius2))
+            # tf.compat.v1.summary.scalar('r%d' % i,
+            #                             tf.sqrt(radius2),
+            #                             family='radii')
     else:
         radii2 = unscaled_radii2 * (r0**2)
 
-    def maybe_feed(r2):
+    def maybe_feed(r2, r20):
         if isinstance(r2, (tf.Tensor, tf.Variable)):
             r = tf.keras.layers.Lambda(tf.sqrt)(radius2)
-            return cache.get_cached(r)
+            return cache.get_cached(r, r20)
         else:
             return np.sqrt(r2)
 
@@ -117,17 +116,19 @@ def cls_head(coords,
     features = utils.flatten_leading_dims(features, 2)
     global_features = []
 
+    default_r0 = r0
     for i, radius2 in enumerate(radii2):
         neighbors, sample_rate = query_fn(coords,
-                                          maybe_feed(radius2),
+                                          maybe_feed(radius2, default_r0**2),
                                           name='query%d' % i)
+        default_r0 *= 2
         if not isinstance(radius2, tf.Tensor):
             radius2 = source.constant(radius2, dtype=tf.float32)
         neighborhood = n.InPlaceNeighborhood(coords, neighbors)
         features, nested_row_splits = core.convolve(features, radius2,
                                                     filters[i], neighborhood,
                                                     coords_transform,
-                                                    weights_transform_,
+                                                    weights_transform,
                                                     convolver.in_place_conv)
         if global_units == 'combined':
             coord_features = coords_transform(neighborhood.out_coords, None)
@@ -142,7 +143,7 @@ def cls_head(coords,
             neighborhood = n.SampledNeighborhood(neighborhood, sample_indices)
             features, nested_row_splits = core.convolve(
                 features, radius2, filters[i + 1], neighborhood,
-                coords_transform, weights_transform_, convolver.resample_conv)
+                coords_transform, weights_transform, convolver.resample_conv)
 
             coords = neighborhood.out_coords
 

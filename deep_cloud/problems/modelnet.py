@@ -4,7 +4,9 @@ from __future__ import print_function
 
 import functools
 import gin
+import six
 import tensorflow as tf
+import tensorflow_datasets as tfds
 from more_keras.framework.problems.tfds import TfdsProblem
 from shape_tfds.shape import modelnet
 
@@ -16,6 +18,7 @@ def _base_modelnet_map(inputs,
                        positions_only=True,
                        num_points=None,
                        random_points=False,
+                       normalize=False,
                        up_dim=2):
     if isinstance(inputs, dict):
         positions = inputs['positions']
@@ -47,6 +50,11 @@ def _base_modelnet_map(inputs,
         if normals is not None:
             normals = tf.roll(normals, shift, axis=-1)
 
+    if normalize:
+        positions = positions - tf.reduce_mean(positions, axis=0, keepdims=True)
+        dist2 = tf.reduce_max(tf.reduce_sum(tf.square(positions), axis=-1))
+        positions = positions / tf.sqrt(dist2)
+
     if positions_only:
         inputs = positions
     else:
@@ -68,9 +76,12 @@ class ModelnetProblem(TfdsProblem):
             objective=None,
             train_split=FULL,  # 'full' or integer percent
             num_parallel_calls=tf.data.experimental.AUTOTUNE,
+            normalize=False,
     ):
         if builder is None:
             builder = modelnet.Pointnet()
+        elif isinstance(builder, six.string_types):
+            builder = tfds.builder(builder)
         if loss is None:
             loss = tf.keras.losses.SparseCategoricalCrossentropy(
                 from_logits=True)
@@ -94,6 +105,7 @@ class ModelnetProblem(TfdsProblem):
             random_points=random_points,
             positions_only=positions_only,
             up_dim=builder.up_dim,
+            normalize=normalize,
         )
         self.num_parallel_calls = num_parallel_calls
         input_spec = tf.keras.layers.InputSpec(shape=(num_points, 3),

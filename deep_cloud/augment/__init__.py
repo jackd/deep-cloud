@@ -13,6 +13,7 @@ from deep_cloud.augment.rigid import random_rigid_transform
 from deep_cloud.augment.rigid import random_scale
 from deep_cloud.augment.rigid import rotate_by_scheme
 from deep_cloud.augment.rigid import maybe_reflect
+from deep_cloud.augment.rigid import random_rotation
 
 
 @gin.configurable(blacklist=['inputs', 'labels'])
@@ -23,11 +24,14 @@ def augment_cloud(
         # jitter_normals=None,
         jitter_clip=None,
         scale_stddev=None,
+        uniform_scale_range=None,
         rigid_transform_stddev=None,
         maybe_reflect_x=False,
         perlin_grid_shape=None,
         perlin_stddev=None,
         rotate_scheme='none',
+        angle_stddev=None,
+        angle_clip=None,
         rotation_dim=2,
 ):
     if isinstance(inputs, dict):
@@ -47,15 +51,15 @@ def augment_cloud(
     if scale_stddev is not None:
         positions = random_scale(positions, stddev=scale_stddev)
 
+    if uniform_scale_range is not None:
+        positions = random_scale(positions, uniform_range=uniform_scale_range)
+
     if rigid_transform_stddev is not None:
-        positions = random_rigid_transform(positions,
-                                           stddev=rigid_transform_stddev)
+        positions, normals = random_rigid_transform(
+            positions, normals, stddev=rigid_transform_stddev)
 
     if maybe_reflect_x:
-        if normals is None:
-            positions = maybe_reflect(positions)
-        else:
-            positions, normals = maybe_reflect((positions, normals))
+        positions, normals = maybe_reflect(positions, normals)
 
     if perlin_grid_shape is not None:
         positions = add_perlin_noise(positions,
@@ -63,9 +67,16 @@ def augment_cloud(
                                      stddev=perlin_stddev)
 
     if rotate_scheme:
-        positions = rotate_by_scheme(positions,
-                                     scheme=rotate_scheme,
-                                     rotation_dim=rotation_dim)
+        positions, normals = rotate_by_scheme(positions,
+                                              normals,
+                                              scheme=rotate_scheme,
+                                              rotation_dim=rotation_dim)
+
+    if angle_stddev:
+        positions, normals = random_rotation(positions,
+                                             normals,
+                                             angle_stddev=angle_stddev,
+                                             angle_clip=angle_clip)
 
     if positions_only:
         inputs = positions

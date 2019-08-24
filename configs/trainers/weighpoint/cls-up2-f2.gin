@@ -1,0 +1,4 @@
+include 'cls-up2.gin'
+include '../../models/weighpoint/tweaks/f2.gin'
+
+model_dir = '~/deep-cloud-models/weighpoint/cls-up2-f2'

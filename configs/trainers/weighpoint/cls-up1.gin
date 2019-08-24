@@ -1,0 +1,10 @@
+include '../../problems/uniform-pointnet.gin'
+include '../../pipelines/pointnet.gin'
+include '../../models/weighpoint/cls.gin'
+include '../../optimizers/adam-decay.gin'
+
+batch_size = 32
+positions_only = False
+epochs = 250
+
+model_dir = '~/deep-cloud-models/weighpoint/cls-up1'

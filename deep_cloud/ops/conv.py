@@ -6,13 +6,32 @@ import tensorflow as tf
 from more_keras.ops import utils
 
 
+def _reduce_unweighted_flat_mean(x, row_splits_or_k, eps):
+    if row_splits_or_k.shape.ndims == 0:
+        # constant neighborhood size
+        x = utils.reshape_leading_dim(x, (-1, row_splits_or_k))
+        _assert_is_rank(3, x, 'x')
+        denom = tf.cast(row_splits_or_k, x.dtype)
+    else:
+        # ragged
+        x = tf.RaggedTensor.from_row_splits(x, row_splits_or_k)
+        assert (x.shape.ndims == 3)
+        denom = tf.expand_dims(tf.cast(utils.diff(row_splits_or_k), x.dtype),
+                               axis=-1)
+        assert (denom.shape.ndims == 2)
+
+    if eps is not None:
+        denom += eps
+    return tf.reduce_sum(x, axis=1) / denom
+
+
 def reduce_flat_mean(x, row_splits_or_k, weights, eps=1e-7):
     """
     Reduce weighted mean of ragged tensor components along axis 1.
 
     Conceptually this should be
     ```python
-    tf.reduce_sum(x * weights, axis=1) / tf.reduce_sum(weights, axis=1)
+    tf.reduce_sum(x, axis=1) / tf.reduce_sum(weights, axis=1)
     ```
     where x and weights either share `row_splits` or 1st dimension (`k`).
 
@@ -25,41 +44,57 @@ def reduce_flat_mean(x, row_splits_or_k, weights, eps=1e-7):
     Args:
         x: [ni, f] float tensor
         row_splits_or_k: [no+1] (row splits) int or scalar int (k)
-        weights: [ni,] or None for uniform weighting
+        weights: [ni] or None for uniform weighting
 
     Returns:
         [no, f] float tensor representing the weighted mean.
     """
+    _assert_is_rank(2, x, 'x')
     x = tf.convert_to_tensor(x, tf.float32)
     row_splits_or_k = tf.convert_to_tensor(row_splits_or_k, tf.int64)
-    if row_splits_or_k.shape.ndims == 0:
-        # k
-        x = utils.reshape_leading_dim(x, (-1, row_splits_or_k))
-        if weights is None:
-            # uniform weight
-            return tf.reduce_mean(x, axis=1)
-        else:
-            weights = tf.expand_dims(weights, axis=-1)
-            return tf.reduce_sum(x * weights, axis=1) / tf.reduce_sum(weights,
-                                                                      axis=1)
-    # ragged
-    if weights is None:
-        return tf.reduce_mean(tf.RaggedTensor.from_row_splits(
-            x, row_splits_or_k),
-                              axis=1)
 
-    weights = tf.convert_to_tensor(weights, tf.float32)
+    # unweighted
+    if weights is None:
+        return _reduce_unweighted_flat_mean(x, row_splits_or_k, eps)
+
+    _assert_is_rank(1, weights, 'weights')
     weights = tf.expand_dims(weights, axis=-1)
-    numer = tf.reduce_sum(tf.RaggedTensor.from_row_splits(
-        x * weights, row_splits_or_k),
-                          axis=1)
-    denom = tf.reduce_sum(tf.RaggedTensor.from_row_splits(
-        weights, row_splits_or_k),
-                          axis=1)
+    numer = x * weights
+    if row_splits_or_k.shape.ndims == 0:
+        # fixed number of neighbors k
+        numer = utils.reshape_leading_dim(numer, (-1, row_splits_or_k))
+        # x is no [no, k, f]
+        weights = utils.reshape_leading_dim(weights, (-1, row_splits_or_k))
+    else:
+        numer = tf.RaggedTensor.from_row_splits(numer, row_splits_or_k)
+        weights = tf.RaggedTensor.from_row_splits(weights, row_splits_or_k)
+
+    # numer (unreduced) is [no, k?, f], weights is [no, k?, 1]
+    numer = tf.reduce_sum(numer, axis=1)
+    denom = tf.reduce_sum(weights, axis=1)
     if eps is not None:
         denom = denom + eps
 
     return numer / denom
+
+
+def _assert_is_rank(rank, tensor, name):
+    err_msg = '{} should be a rank {} tensor, got {}'
+    if not (isinstance(tensor, tf.Tensor) and tensor.shape.ndims == rank):
+        raise ValueError(err_msg.format(name, rank, tensor))
+
+
+# def expanding_edge_conv(
+#         node_features, coord_features, indices, weights, eps=1e-7):
+#     """
+#     Expanding edge convolution.
+
+#     Args:
+#         node_features: [B, n?, f_i] possibly ragged tensor of features at nodes.
+#         coord_features: [B, n?, k?, p] possibly ragged tensor of features of
+#             relative coordinates.
+#         indices: [B, n?, k?]
+#     """
 
 
 def flat_expanding_edge_conv(node_features,
@@ -84,21 +119,23 @@ def flat_expanding_edge_conv(node_features,
         convolved node_features, [pok, fi*fk]
     """
     if node_features is None:
-        return reduce_flat_mean(coord_features, row_splits_or_k, weights)
+        return reduce_flat_mean(coord_features, row_splits_or_k, weights, eps)
     else:
-        assert (all(
-            isinstance(t, tf.Tensor) and t.shape.ndims == 2
-            for t in (node_features, coord_features)))
-        assert (weights is None or
-                isinstance(weights, tf.Tensor) and weights.shape.ndims == 2)
+        for name, tensor in (('node_features', node_features),
+                             ('coord_features', coord_features)):
+            _assert_is_rank(2, tensor, name)
+        if weights is not None:
+            _assert_is_rank(1, weights, 'weights')
+
         if indices is not None:
             assert (indices.shape.ndims == 1)
             node_features = tf.gather(node_features, indices)
-        if weights is not None:
-            coord_features = weights * coord_features
+
+        # doing coord_features * weights before outer product might be faster?
         merged = utils.outer(node_features, coord_features)
         merged = utils.flatten_final_dims(merged, 2)
-        return reduce_flat_mean(merged, row_splits_or_k, weights, eps=1e-7)
+        out = reduce_flat_mean(merged, row_splits_or_k, weights, eps)
+        return out
 
 
 def flat_expanding_global_deconv(global_features, coord_features,

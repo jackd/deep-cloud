@@ -1,0 +1,2 @@
+include 'pointnet.gin'
+pointnet_builder.uniform_density = True

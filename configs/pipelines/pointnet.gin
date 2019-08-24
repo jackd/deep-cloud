@@ -1,0 +1,30 @@
+# pipeline from code
+# Configures:
+# pipeline
+# epochs
+# batch_size
+
+import more_keras.framework.pipelines
+import deep_cloud.augment
+
+pipeline = {
+    'train': @train/Pipeline(),
+    'validation': @validation/Pipeline(),
+}
+
+Pipeline.batch_size = %batch_size
+Pipeline.repeats = None
+
+batch_size = 32
+
+train/Pipeline.map_fn = @train/augment_cloud
+train/Pipeline.shuffle_buffer = 1024
+train/augment_cloud.rotate_scheme = 'random'
+train/augment_cloud.jitter_stddev = 1e-2
+train/augment_cloud.jitter_clip = 5e-2
+train/augment_cloud.angle_stddev = None
+train/augment_cloud.angle_clip = None
+train/augment_cloud.uniform_scale_range = None
+
+validation/Pipeline.map_fn = @validation/augment_cloud
+validation/augment_cloud.rotate_scheme = 'none'

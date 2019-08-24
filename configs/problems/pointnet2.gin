@@ -1,0 +1,2 @@
+include 'pointnet.gin'
+pointnet_builder.pointnet_version = 2

@@ -49,8 +49,7 @@ def mlp_layer(flat_features,
     if dropout_rate is not None:
         flat_features = Dropout(rate=dropout_rate)(flat_features)
     if use_batch_normalization:
-        flat_features = BatchNormalization(
-            scale=activation != 'relu')(flat_features)
+        flat_features = BatchNormalization()(flat_features)
     return flat_features
 
 
@@ -199,21 +198,21 @@ def convolve(features,
 
     Args:
         features: [N_i, filters_in] float32 tensor of flattened batched
-            point features
-        radius2: float32 scalar squared radius value
-        filters: python int, number of filters out
-        neighborhood: `weighpoint.models.neigh.Neighborhood` instance
+            point features.
+        radius2: float32 scalar squared radius value.
+        filters: python int, number of filters out.
+        neighborhood: `deepcloud.neigh.Neighborhood.Neighborhood` instance.
         coords_transform: function mapping relative coordinates to coord
-            features
-        weights_transform: function mapping relative coordinates to weights
+            features.
+        weights_transform: function mapping relative coordinates to weights.
         convolver_fn: One of `weighpoint.model.convolvers.Convolver` instance
-            methods
+            methods.
         global_features: [B, filters] float32 or None. If not None, these are
             added after the convolution.
 
     Returns:
-        features: [N_o, filters] float32 array
-        nested_row_splits: row splits of implicit ragged features
+        features: [N_o, filters] float32 array.
+        nested_row_splits: row splits of implicit ragged features.
         i.e. the ragged features can be created using
             `tf.RaggedTensor.from_row_splits(features, nested_row_splits)`
     """

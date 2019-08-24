@@ -1,0 +1,9 @@
+include '../../problems/pointnet.gin'
+include '../../pipelines/pointnet.gin'
+include '../../models/pointnet/paper.gin'
+include '../../optimizers/adam-decay.gin'
+
+optimizer/ExponentialDecayTowards.decay_rate = 0.5
+
+epochs = 250
+model_dir = '~/deep-cloud-models/pointnet/paper'

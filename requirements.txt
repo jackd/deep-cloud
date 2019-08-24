@@ -1,5 +1,6 @@
 absl
 tensorflow_datasets
+tensorflow_graphics
 gin-config
 ray
 pandas

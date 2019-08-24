@@ -101,7 +101,7 @@ def lde_transformer(num_complex_features=8,
 
 
 def _dist2(x):
-    return tf.reduce_sum(tf.square(x), axis=-1, keepdims=True)
+    return tf.reduce_sum(tf.square(x), axis=-1)
 
 
 @gin.configurable
@@ -113,10 +113,6 @@ def ctg_transformer():
         ctg_layer = ctg.ContinuousTruncatedGaussian()
         ctg_factor = tf.ragged.map_flat_values(
             lambda sd: ctg_layer([sd, radius2]), squared_dists(x, radius2))
-        # layer must be built/called before adding summary
-        tf.compat.v1.summary.scalar('%s-factor' % ctg_layer.name,
-                                    ctg_layer.scale_factor,
-                                    family='ctg_scales')
         return ctg_factor
 
     return f
