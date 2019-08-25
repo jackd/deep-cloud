@@ -31,7 +31,7 @@ import tensorflow as tf
 #     return acc.stack()
 
 
-def iterative_farthest_point_sample(points, num_samples=None):
+def iterative_farthest_point_order(points, num_samples=None):
 
     def cond(count, index, dist2, acc):
         return count < num_samples - 1
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     runs = 100
     with tf.device('/cpu:0'):
         points = tf.random.uniform(shape=(1024, 3), dtype=tf.float32)
-        indices = iterative_farthest_point_sample(points, 512)
+        indices = iterative_farthest_point_order(points, 512)
 
     with tf.Session() as sess:
         for _ in range(warmup):
