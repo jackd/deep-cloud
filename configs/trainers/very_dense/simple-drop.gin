@@ -1,0 +1,3 @@
+include 'simple.gin'
+get_base_global_network.dropout_impl = @mk.layers.Dropout
+mk.layers.Dropout.rate = 0.4

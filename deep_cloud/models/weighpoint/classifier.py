@@ -165,7 +165,7 @@ def weighpoint_classifier(input_spec,
                           head_fn=cls_head,
                           tail_fn=cls_tail):
     inputs = tf.nest.map_structure(
-        lambda spec: b.prebatch_input(shape=spec.shape, dtype=spec.dtype),
+        lambda spec: b.prebatch_input(shape=spec.shape[1:], dtype=spec.dtype),
         input_spec)
     coords = inputs['positions']
     normals = inputs.get('normals')

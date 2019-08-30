@@ -42,7 +42,6 @@ def augment_cloud(
         positions = inputs
         positions_only = True
         normals = None
-
     if jitter_stddev is not None:
         positions = jitter_positions(positions,
                                      stddev=jitter_stddev,
@@ -82,4 +81,5 @@ def augment_cloud(
         inputs = positions
     else:
         inputs = dict(positions=positions, normals=normals)
+
     return inputs, labels

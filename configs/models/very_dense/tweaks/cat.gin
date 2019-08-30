@@ -1,0 +1,2 @@
+concat_node_features = True
+concat_edge_features = True

@@ -1,0 +1,9 @@
+import deep_cloud.models.very_dense.core
+positions_only = False
+model_fn = @very_dense_classifier
+
+ModelnetProblem.repeated_outputs = %repeats
+very_dense_classifier.repeats = %repeats
+
+repeats = 3
+is_meta_model = True

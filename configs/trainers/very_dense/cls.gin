@@ -1,0 +1,10 @@
+include '../../problems/pointnet.gin'
+include '../../pipelines/pointnet.gin'
+include '../../models/very_dense/cls.gin'
+include '../../optimizers/adam-decay.gin'
+
+batch_size = 32
+positions_only = False
+epochs = 250
+
+model_dir = '~/deep-cloud-models/very_dense/cls'

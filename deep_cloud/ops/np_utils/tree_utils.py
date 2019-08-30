@@ -8,6 +8,21 @@ from scipy.spatial import cKDTree  # pylint: disable=no-name-in-module
 import scipy.sparse as sp
 from more_keras.ragged.np_impl import RaggedArray
 
+KDTree = cKDTree
+
+
+def truncate(neighbors, limit):
+    """Take only the first `limit` entries of each row of `neighbors`."""
+    row_lengths = neighbors.row_lengths
+    true_counts = np.minimum(row_lengths, limit)
+    truncated = np.maximum(row_lengths - limit, 0)
+    values = np.array([[True, False]], dtype=np.bool)
+    repeats = np.stack((true_counts, truncated), axis=1)
+    mask = np.repeat(
+        np.tile(values, (len(row_lengths), 1)).flatten(), repeats.flatten())
+    flat_values = neighbors.flat_values[mask]
+    return RaggedArray.from_row_lengths(flat_values, true_counts)
+
 
 def query_ball_tree(in_tree, out_tree, radius):
     """
@@ -62,8 +77,8 @@ def reverse_query_ball(ragged_array, size=None, data=None):
     in_coords = r.uniform(size=(na, 3))
     out_coords = r.uniform(size=(nb, 3))
 
-    in_tree = tree_utils.cKDTree(in_coords)
-    out_tree = tree_utils.cKDTree(out_coords)
+    in_tree = tree_utils.KDTree(in_coords)
+    out_tree = tree_utils.KDTree(out_coords)
     arr = tree_utils.query_ball_tree(in_tree, out_tree, radius)
 
     rel_coords = np.repeat(out_coords, arr.row_lengths, axis=0) - \

@@ -1,0 +1,8 @@
+import more_keras.keras_configurables
+include '../../problems/pointnet2.gin'
+include '../../pipelines/pointnet2.gin'
+include '../../models/pointnet3/msg.gin'
+include '../../optimizers/adam-decay.gin'
+
+epochs = 250
+# model_dir = '~/deep-cloud-models/pointnet3/TODO'

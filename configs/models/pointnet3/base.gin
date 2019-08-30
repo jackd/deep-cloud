@@ -1,0 +1,21 @@
+import more_keras.framework.pipelines
+import deep_cloud.models.pointnet3
+
+model_fn = @pointnet3_classifier
+
+pipeline = {
+    'train': @train/map_pipeline(),
+    'validation': @validation/map_pipeline(),
+}
+
+train/map_pipeline.pipeline = @train/Pipeline()
+validation/map_pipeline.pipeline = @validation/Pipeline()
+
+train/map_pipeline.map_fn = @train/pre_batch_map
+validation/map_pipeline.map_fn = @validation/pre_batch_map
+
+map_pipeline.post_batch_map_fn = @post_batch_map
+mlp.batch_norm_impl = @mk.layers.BatchNormalization
+
+train/pre_batch_map.reorder = %reorder
+reorder = False

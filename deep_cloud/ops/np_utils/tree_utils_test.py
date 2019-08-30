@@ -115,6 +115,23 @@ class BallNeighborhoodTest(unittest.TestCase):
         np.testing.assert_equal(out_neigh.values, out_neigh2.values)
         np.testing.assert_equal(out_neigh.row_splits, out_neigh2.row_splits)
 
+    def test_truncate(self):
+        r = np.random.RandomState(123)  # pylint: disable=no-member
+        upper = 10
+        row_lengths = (r.uniform(size=(10,)) * upper).astype(np.int64)
+        data = np.zeros((np.sum(row_lengths),), dtype=np.bool)
+        ragged = RaggedArray.from_row_lengths(data, row_lengths)
+
+        def slow_truncate(ragged, limit):
+            return RaggedArray.from_ragged_lists(
+                tuple(rl[:limit] for rl in ragged.ragged_lists))
+
+        limit = upper // 2
+        actual = tree_utils.truncate(ragged, limit)
+        expected = slow_truncate(ragged, limit)
+        np.testing.assert_equal(actual.flat_values, expected.flat_values)
+        np.testing.assert_equal(actual.row_splits, expected.row_splits)
+
 
 # BallNeighborhoodTest().test_reverse_query_ball()
 # BallNeighborhoodTest().test_query_pairs()

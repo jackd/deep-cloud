@@ -5,7 +5,6 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 
-from more_keras.tf_compat import dim_value
 from deep_cloud.ops.np_utils import tree_utils
 from more_keras.ragged import np_impl as ra
 
@@ -27,7 +26,7 @@ def query_pairs(coords, radius, max_neighbors=None):
     size = coords.shape[0]
 
     if not isinstance(size, int):
-        size = dim_value(coords.shape[0])
+        size = coords.shape[0]
     if size is not None:
         size += 1
     row_splits.set_shape((size))

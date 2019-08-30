@@ -19,7 +19,8 @@ def _base_modelnet_map(inputs,
                        num_points=None,
                        random_points=False,
                        normalize=False,
-                       up_dim=2):
+                       up_dim=2,
+                       repeats=None):
     if isinstance(inputs, dict):
         positions = inputs['positions']
         normals = None if positions_only else inputs['normals']
@@ -59,7 +60,21 @@ def _base_modelnet_map(inputs,
         inputs = positions
     else:
         inputs = dict(positions=positions, normals=normals)
+    if repeats is not None:
+        labels = (labels,) * (repeats + 1)
     return inputs, labels
+
+
+def _repeat_configurable(configurable, num_repeats, name='{orig}-{index}'):
+    """Get `num_repeats + 1` versions of configurable."""
+    config = configurable.get_config()
+    cls = type(configurable)
+    orig = config.pop('name')
+    out = []
+    for i in range(num_repeats + 1):
+        config['name'] = name.format(orig=orig, index=i)
+        out.append(cls.from_config(config))
+    return out
 
 
 @gin.configurable
@@ -77,6 +92,7 @@ class ModelnetProblem(TfdsProblem):
             train_split=FULL,  # 'full' or integer percent
             num_parallel_calls=tf.data.experimental.AUTOTUNE,
             normalize=False,
+            repeated_outputs=None,
     ):
         if builder is None:
             builder = modelnet.Pointnet()
@@ -91,6 +107,12 @@ class ModelnetProblem(TfdsProblem):
                 tf.keras.metrics.SparseCategoricalCrossentropy(
                     from_logits=True),
             ]
+        if repeated_outputs is not None:
+            loss = _repeat_configurable(loss, repeated_outputs)
+            metrics = tuple(
+                zip(*(_repeat_configurable(m, repeated_outputs)
+                      for m in metrics)))
+
         self._train_split = train_split
         if train_split == FULL:
             split_map = dict(validation='test')
@@ -106,23 +128,25 @@ class ModelnetProblem(TfdsProblem):
             positions_only=positions_only,
             up_dim=builder.up_dim,
             normalize=normalize,
+            repeats=repeated_outputs,
         )
         self.num_parallel_calls = num_parallel_calls
-        input_spec = tf.keras.layers.InputSpec(shape=(num_points, 3),
-                                               dtype=tf.float32)
+        input_spec = tf.TensorSpec(shape=(num_points, 3), dtype=tf.float32)
         if not positions_only:
             input_spec = dict(
                 positions=input_spec,
                 normals=input_spec,
             )
+        labels_spec = tf.TensorSpec(shape=(), dtype=tf.int64)
+        element_spec = (input_spec, labels_spec)
+        if repeated_outputs:
+            labels_spec = [labels_spec] * (repeated_outputs + 1)
         super(ModelnetProblem, self).__init__(
             builder=builder,
             loss=loss,
             metrics=metrics,
             objective=objective,
-            input_spec=input_spec,
-            labels_spec=tf.keras.layers.InputSpec(shape=(), dtype=tf.int64),
-            output_spec=None,
+            element_spec=element_spec,
             as_supervised=True,
             split_map=split_map,
         )

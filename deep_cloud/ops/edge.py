@@ -51,23 +51,27 @@ def _reduce_simple(flat_edge_values,
         symmetric: if True, features_b are not computed.
 
     Returns:
+        `features_a` if symmetric, else `features_a, features_b`
         features_a: [na, f] features in disjoint set `a`
         featrues_b: [size, f] features in disjoint set `b`, or None if
             `symmetric`
     """
-    assert_flat_tensor('flat_edge_values', flat_edge_values, 2, dtype=INT_TYPES)
+    assert_flat_tensor('flat_edge_values',
+                       flat_edge_values,
+                       2,
+                       dtype=FLOAT_TYPES)
     assert_flat_tensor('flat_node_indices',
                        flat_node_indices,
                        1,
                        dtype=INT_TYPES)
-    if not isinstance(size, int) or isinstance(size,
-                                               tf.Tensor) and size.shape != ():
+    if not (isinstance(size, int) or
+            isinstance(size, tf.Tensor) and size.shape.ndims == 0):
         raise ValueError('size must be a scalar, got {}'.format(size))
     features_a = ragged_reduction(tf.RaggedTensor.from_row_splits(
         flat_edge_values, row_splits),
                                   axis=1)
     if symmetric:
-        features_b = None
+        return features_a
     else:
         features_b = unsorted_segment_reduction(flat_edge_values,
                                                 flat_node_indices, size)
@@ -161,6 +165,7 @@ def reduce_weighted_mean(flat_edge_values,
         delta: small offset to avoid division by zero for isolated nodes.
 
     Returns:
+        `features_a` if symmetric else `features_a, features_b`
         features_a: [na, f] features in disjoint set `a`
         features_b: [size, f] features in disjoint set `b`, or None if symmetric
     """
@@ -191,8 +196,11 @@ def reduce_weighted_mean(flat_edge_values,
                         size,
                         symmetric=symmetric)
     # check for None in case of symmetry.
+
     features_a, features_b = (None if numer is None else numer / (denom + delta)
                               for numer, denom in zip(numers, denoms))
+    if symmetric:
+        return features_a
     return features_a, features_b
 
 
@@ -219,8 +227,6 @@ def distribute_node_features(node_features_a, node_features_b,
     assert_flat_tensor('flat_edge_features', flat_edge_features, 2, FLOAT_TYPES)
     assert_flat_tensor('flat_node_indices', flat_node_indices, 1, INT_TYPES)
     assert_flat_tensor('row_splits', row_splits, 1, INT_TYPES)
-    node_features_a = utils.repeat(node_features_a,
-                                   utils.diff(row_splits),
-                                   axis=0)
+    node_features_a = tf.repeat(node_features_a, utils.diff(row_splits), axis=0)
     node_features_b = tf.gather(node_features_b, flat_node_indices)
     return tf.add_n([node_features_a, node_features_b, flat_edge_features])

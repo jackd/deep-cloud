@@ -1,0 +1,4 @@
+include 'simple.gin'
+
+units_scale = 8
+model_dir = '~/deep-cloud-models/very_dense/simple-s8'

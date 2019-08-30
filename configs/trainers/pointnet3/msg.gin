@@ -1,0 +1,4 @@
+include 'base.gin'
+include '../../models/pointnet3/msg.gin'
+
+model_dir = '~/deep-cloud-models/pointnet3/msg'

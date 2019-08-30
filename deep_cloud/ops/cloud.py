@@ -5,7 +5,6 @@ from __future__ import print_function
 import tensorflow as tf
 from deep_cloud.ops.np_utils import cloud as _cloud
 from more_keras.ops import utils
-from more_keras.tf_compat import dim_value
 
 
 def get_relative_coords(in_coords, out_coords, indices):
@@ -31,5 +30,5 @@ def _get_relative_coords_py_function(in_coords, out_coords, indices):
     flat_coords = tf.py_function(
         fn, [in_coords, out_coords, indices.values,
              indices.row_lengths()], in_coords.dtype)
-    flat_coords.set_shape([None, dim_value(in_coords.shape[-1])])
+    flat_coords.set_shape([None, in_coords.shape[-1]])
     return indices.with_values(flat_coords)

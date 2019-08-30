@@ -1,0 +1,5 @@
+import more_keras.layers.batch_norm
+import more_keras.models
+
+mk.models.mlp.batch_norm_impl = @mk.layers.ConsistentBatchNormalization
+mk.layers.ConsistentBatchNormalization.training = True

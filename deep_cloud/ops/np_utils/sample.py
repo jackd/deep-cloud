@@ -66,3 +66,14 @@ def inverse_density_mask(neighborhood_size,
         keep_rate = 1.0 / weight
         keep_rate *= mean_keep_rate / np.mean(keep_rate)
     return np.random.uniform(size=keep_rate.size) < keep_rate
+
+
+def rejection_sample(values, row_splits):
+    out = []
+    N = np.size(row_splits) - 1
+    consumed = np.zeros((N,), dtype=np.bool)
+    for i in range(N):
+        if not consumed[i]:
+            out.append(i)
+            consumed[values[row_splits[i]:row_splits[i + 1]]] = True
+    return np.array(out, dtype=np.int32)

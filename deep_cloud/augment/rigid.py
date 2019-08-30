@@ -152,7 +152,6 @@ def random_rotation(positions, normals=None, angle_stddev=0.06,
     batch_shape = positions.shape[:-2].as_list()
     matrix = random_rotation_matrix(batch_shape, angle_stddev, angle_clip)
     positions = tf.matmul(positions, matrix)
-    if normals is None:
-        return positions
-    else:
-        return positions, tf.matmul(normals, matrix)
+    if normals is not None:
+        normals = tf.matmul(normals, matrix)
+    return positions, normals

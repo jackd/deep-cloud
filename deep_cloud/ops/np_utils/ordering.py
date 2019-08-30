@@ -12,11 +12,11 @@ from __future__ import print_function
 import numpy as np
 
 
-def iterative_farthest_point_ordering(points, num_samples=None):
+def iterative_farthest_point_ordering(points, num_samples=None, first=None):
     if num_samples is None:
         num_samples = points.shape[0]
-    index = int(np.random.uniform() * num_samples)
-    out = np.empty(shape=(num_samples,), dtype=np.int32)
+    index = int(np.random.uniform() * num_samples) if first is None else first
+    out = np.empty(shape=(num_samples,), dtype=np.int64)
     out[0] = index
     dist2 = np.sum((points - points[index])**2, axis=-1)
     for i in range(1, num_samples):
@@ -26,6 +26,22 @@ def iterative_farthest_point_ordering(points, num_samples=None):
         out[i] = index
     out[-1] = np.argmax(dist2)
     return out
+
+
+def partial_reorder(indices, points, *args):
+    total = points.shape[0]
+    mask = np.ones(shape=(total,), dtype=np.bool)
+    mask[indices] = False
+    out = tuple(
+        np.concatenate((inp[indices], inp[mask]), axis=0)
+        for inp in ((points,) + args))
+    return out[0] if len(args) == 0 else out
+
+
+def fps_reorder(points, *args, sample_frac=0.5):
+    indices = iterative_farthest_point_ordering(
+        points, int(points.shape[0] * sample_frac))
+    return partial_reorder(indices, points, *args)
 
 
 if __name__ == '__main__':

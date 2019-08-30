@@ -8,5 +8,7 @@ import deep_cloud.problems.modelnet
 import shape_tfds.shape.modelnet.pointnet
 problem = @ModelnetProblem()
 ModelnetProblem.positions_only = %positions_only
+ModelnetProblem.num_points = %num_points
 
 positions_only = True
+num_points = 1024

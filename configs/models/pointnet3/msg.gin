@@ -1,0 +1,11 @@
+include 'base.gin'
+
+pre_batch_map.radii_lists = ((0.1, 0.2, 0.4), (0.2, 0.4, 0.8))
+pre_batch_map.limits_lists = ((16, 32, 128), (32, 64, 128))
+pre_batch_map.sample_fracs = (0.5, 0.125)
+
+pointnet3_classifier.layer_network_lists = @mlp_recurse()
+mlp_recurse.units = (
+    ((32, 32, 64), (64, 64, 128), (64, 96, 128)),
+    ((64, 64, 128), (128, 128, 256), (128, 128, 256)),
+)

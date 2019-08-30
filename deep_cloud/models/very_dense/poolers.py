@@ -2,8 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import abc
+import gin
 from deep_cloud.ops.np_utils import sample
-from deep_cloud.models.very_dense import utils
 
 
 class Pooler(object):
@@ -18,6 +18,7 @@ class Pooler(object):
         return None
 
 
+@gin.configurable
 class SlicePooler(Pooler):
 
     def __init__(self, survival_rate=0.5):
@@ -35,6 +36,7 @@ class SlicePooler(Pooler):
         return int(input_size * self._survival_rate)
 
 
+@gin.configurable
 class InverseDensitySamplePooler(Pooler):
 
     def __init__(self, survival_rate=0.5):

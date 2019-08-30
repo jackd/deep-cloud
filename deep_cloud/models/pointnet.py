@@ -9,9 +9,11 @@ import gin
 from more_keras import callbacks as cb
 from more_keras.layers import VariableMomentumBatchNormalization
 from more_keras.schedules import exponential_decay_towards
-from more_keras.tf_compat import dim_value
+from more_keras.framework import spec
 import six
 layers = tf.keras.layers
+
+tf.compat.v1.enable_v2_tensorshape()
 
 
 def mlp(x,
@@ -42,7 +44,7 @@ class NonorthogonalRegularizer(tf.keras.regularizers.Regularizer):
 
     def __call__(self, transform):
         x = tf.matmul(transform, transform, transpose_b=True)
-        x = tf.eye(dim_value(x.shape[-1]), dtype=x.dtype) - x
+        x = tf.eye(x.shape[-1], dtype=x.dtype) - x
         terms = []
 
         if self.l1:
@@ -161,8 +163,7 @@ def pointnet_classifier(
         keras model with logits as outputs and list of necessary callbacks.
     """
     transform_kwargs = dict(transpose_b=not transpose_transform)
-    inputs = tf.keras.layers.Input(shape=input_spec.shape,
-                                   dtype=input_spec.dtype)
+    inputs = spec.inputs(input_spec)
     if use_batch_norm and callable(batch_norm_momentum):
         batch_norm_momentum = 0.99  # initial momentum - irrelevant?
         cb.aggregator.append(

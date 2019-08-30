@@ -1,3 +1,4 @@
 import deep_cloud.models.weighpoint.classifier
 positions_only = False
 model_fn = @weighpoint_classifier
+is_meta_model = True

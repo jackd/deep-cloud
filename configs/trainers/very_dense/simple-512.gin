@@ -1,0 +1,4 @@
+include 'simple.gin'
+
+num_points = 512
+model_dir = '~/deep-cloud-models/very_dense/simple-512'
