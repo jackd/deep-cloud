@@ -1,0 +1,3 @@
+residual_global_features = True
+residual_node_features = True
+residual_edge_features = True

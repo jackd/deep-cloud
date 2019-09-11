@@ -10,6 +10,7 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+from more_keras.ops import utils as op_utils
 from deep_cloud.ops.asserts import assert_flat_tensor, INT_TYPES, FLOAT_TYPES
 
 # shared by reduce_sum, reduce_max, reduce_min, reduce_mean
@@ -227,6 +228,8 @@ def distribute_node_features(node_features_a, node_features_b,
     assert_flat_tensor('flat_edge_features', flat_edge_features, 2, FLOAT_TYPES)
     assert_flat_tensor('flat_node_indices', flat_node_indices, 1, INT_TYPES)
     assert_flat_tensor('row_splits', row_splits, 1, INT_TYPES)
-    node_features_a = tf.repeat(node_features_a, utils.diff(row_splits), axis=0)
+    node_features_a = op_utils.repeat(node_features_a,
+                                      utils.diff(row_splits),
+                                      axis=0)
     node_features_b = tf.gather(node_features_b, flat_node_indices)
     return tf.add_n([node_features_a, node_features_b, flat_edge_features])

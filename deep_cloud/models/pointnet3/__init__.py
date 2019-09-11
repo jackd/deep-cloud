@@ -13,10 +13,12 @@ from deep_cloud.ops import edge
 from deep_cloud.ops import asserts
 from deep_cloud.ops import ordering
 from deep_cloud.ops import cloud
-from deep_cloud.ops.np_utils import tree_utils
+from deep_cloud.ops.np_utils.tree_utils import spatial
+from deep_cloud.ops.np_utils.tree_utils import pykd
+from deep_cloud.ops.np_utils.tree_utils import truncate
 
 
-def multi_scale_group(in_tree, out_tree, radii, limits):
+def multi_scale_group(in_tree, out_tree, radii, max_neighbors):
     """
     Get neighborhoods across multiple radii.
 
@@ -26,15 +28,32 @@ def multi_scale_group(in_tree, out_tree, radii, limits):
         in_tree: input KDTree
         out_tree: output KDTree
         radii: [N] float radii to search. Assumed to be in ascending order.
-        limits: [N] ints maximum number of neighbors.
+        max_neighbors: [N] ints maximum number of neighbors.
 
     Returns:
         [N] RaggedArrays, corresponding to zipped radii/limits.
     """
     return tuple(
-        tree_utils.truncate(
-            tree_utils.query_ball_tree(in_tree, out_tree, radius), limit)
-        for radius, limit in zip(radii, limits))
+        out_tree.query_ball_tree(in_tree, radius, max_neighbors=mn)
+        for radius, mn in zip(radii, max_neighbors))
+
+
+def _query_all_pairs(
+        *all_coords,
+        tree_impl=None,
+        radii_lists=None,
+        max_neighbors_lists=None):
+    trees = [tree_impl(c.numpy()) for c in all_coords]
+    values = []
+    row_splits = []
+    for i, (radii, max_neighbors) in enumerate(zip(
+            radii_lists, max_neighbors_lists)):
+        n = multi_scale_group(
+            trees[i], trees[i + 1], radii, max_neighbors)
+        row_splits.extend(ni.row_splits for ni in n)
+        values.extend(ni.values for ni in n)
+    values.extend(row_splits)
+    return values
 
 
 @gin.configurable(blacklist=['features', 'labels', 'weights'])
@@ -45,14 +64,19 @@ def pre_batch_map(
         reorder=False,
         sample_fracs=(0.5, 0.125),
         radii_lists=((0.1, 0.2, 0.4), (0.2, 0.4, 0.8)),
-        limits_lists=((16, 32, 128), (32, 64, 128)),
+        max_neighbors_lists=((16, 32, 128), (32, 64, 128)),
         return_all_coords=False,
+        tree_impl=pykd.KDTree,
 ):
     depth = len(radii_lists)
     if len(sample_fracs) != depth:
         raise ValueError(
             'Expected length of `sample_fracs` and `radii_lists` to be the '
             'same, but {} != {}'.format(len(sample_fracs), depth))
+    if len(max_neighbors_lists) != depth:
+        raise ValueError(
+            'Expected length of `max_neighbors_lists` and `radii_lists` to be '
+            'the same, but {} != {}'.format(len(max_neighbors_lists), depth))
     if isinstance(features, dict):
         coords = features['positions']
         normals = features['normals']
@@ -79,19 +103,14 @@ def pre_batch_map(
 
     all_coords = (coords, *(coords[:n] for n in num_points))
 
-    def query_all_pairs(*all_coords):
-        trees = [tree_utils.KDTree(c.numpy()) for c in all_coords]
-        values = []
-        row_splits = []
-        for i, (radii, limits) in enumerate(zip(radii_lists, limits_lists)):
-            n = multi_scale_group(trees[i], trees[i + 1], radii, limits)
-            row_splits.extend(ni.row_splits for ni in n)
-            values.extend(ni.values for ni in n)
-        values.extend(row_splits)
-        return values
-
     n_out = sum(len(r) for r in radii_lists)
-    out = tf.py_function(query_all_pairs, all_coords, [tf.int64] * n_out * 2)
+    fn = functools.partial(
+        _query_all_pairs,
+        tree_impl=tree_impl,
+        radii_lists=radii_lists,
+        max_neighbors_lists=max_neighbors_lists
+    )
+    out = tf.py_function(fn, all_coords, [tf.int64] * n_out * 2)
 
     flat_node_indices = out[:n_out]
     for fni in flat_node_indices:
@@ -177,9 +196,18 @@ def get_logits(features, num_classes, dropout_rate=0.5):
                                               rate=dropout_rate))(features)
 
 
+def ragged_reduce(args, reduction, **kwargs):
+    value, *row_splits = args
+    rt = tf.RaggedTensor.from_nested_row_splits(value, row_splits)
+    out = reduction(rt, **kwargs)
+    if isinstance(out, tf.Tensor):
+        return out
+    else:
+        return [out, *out.nested_row_splits]
+
+
 @gin.configurable(blacklist=[
-    'node_features', 'flat_rel_coords', 'flat_node_indices', 'row_splits'
-])
+    'node_features', 'flat_rel_coords', 'flat_node_indices', 'row_splits'])
 def pointnet_block(node_features,
                    flat_rel_coords,
                    flat_node_indices,
@@ -223,7 +251,12 @@ def pointnet_block(node_features,
     flat_edge_features = edge_network_fn(flat_edge_features)
     edge_features = tf.RaggedTensor.from_row_splits(flat_edge_features,
                                                     row_splits)
-    node_features = reduction(edge_features, axis=1)
+    node_features = tf.keras.layers.Lambda(
+        ragged_reduce, arguments=dict(reduction=reduction, axis=1))(
+            [edge_features.flat_values, *edge_features.nested_row_splits])
+    if isinstance(node_features, (list, tuple)):
+        node_features = tf.RaggedTensor.from_nested_row_splits(
+            node_features[0], node_features[1:])
     return node_features
 
 
@@ -297,10 +330,25 @@ if __name__ == '__main__':
     n = 1024
     batch_size = 2
     coords = np.random.uniform(size=(batch_size, n, 3)).astype(np.float32)
-    from deep_cloud.ops.np_utils import tree_utils
-    tree = tree_utils.KDTree(coords[0])
-    neighbors = tree_utils.query_ball_tree(tree_utils.KDTree(coords[0]),
-                                           tree_utils.KDTree(coords[1]), 0.2)
+
+    # c0 = [coords[0]]
+    # max_neighbors_lists = ((32,), (64,))
+    # radii_lists = ((0.1,), (0.2,))
+    # for _ in max_neighbors_lists:
+    #     c0.append(c0[-1][:len(c0[-1]) // 2])
+
+    # trees = [spatial.KDTree(c) for c in c0]
+    # groups = []
+    # for i, (radii, max_neighbors) in enumerate(
+    #         zip(radii_lists, max_neighbors_lists)):
+    #     groups.append(
+    #         multi_scale_group(trees[i], trees[i+1], radii, max_neighbors))
+    # for g in groups:
+    #     for gi in g:
+    #         print(gi.values.shape, gi.row_splits.shape)
+
+    neighbors = spatial.KDTree(coords[0]).query_ball_tree(
+        spatial.KDTree(coords[1]), 0.2, max_neighbors=None)
     coords[..., 2] = 0.1 * np.reshape(np.arange(batch_size),
                                       (-1, 1))  # separate planes
     normals = np.random.normal(size=(batch_size, n, 3)).astype(np.float32)
@@ -313,7 +361,8 @@ if __name__ == '__main__':
         dataset = dataset.map(
             functools.partial(pre_batch_map,
                               return_all_coords=True,
-                              limits=(32, 64),
+                              max_neighbors_lists=((32,), (64,)),
+                              radii_lists=((0.1,), (0.2,)),
                               reorder=True))
         dataset = dataset.batch(batch_size)
         dataset = dataset.map(
@@ -324,6 +373,10 @@ if __name__ == '__main__':
             features = sess.run(features)
     (flat_normals, flat_rel_coords, flat_node_indices, row_splits, flat_coords,
      outer_row_splits) = features
+
+    flat_rel_coords, = zip(*flat_rel_coords)
+    row_splits, = zip(*row_splits)
+    flat_node_indices, = zip(*flat_node_indices)
 
     radii = (0.2, 0.4)
 
@@ -338,15 +391,10 @@ if __name__ == '__main__':
             geometries = [p0, p1]
             rs = row_splits[i]
             ni = node_indices[i]
-            # print(ni.shape)
             for j in outer_row_splits[i][:-1]:
-                # print(rs[j])
-                # print(rs[j + 1])
-                # print('---')
-                # print(coords[ni[rs[j]:rs[j + 1]]])
                 geometries.append(
                     trimesh.primitives.Sphere(center=coords[i + 1][j],
-                                              radius=0.05,
+                                              radius=0.02,
                                               color=(255, 255, 255)))
                 geometries.append(
                     trimesh.PointCloud(coords[i][ni[rs[j]:rs[j + 1]]],

@@ -151,13 +151,12 @@ def flat_expanding_global_deconv(global_features, coord_features,
     Returns:
         convolved features: [po, fi*fk]
     """
-    from tensorflow.python.ops.ragged.ragged_util import repeat  # pylint: disable=no-name-in-module
     if row_splits_or_k.shape.ndims == 0:
         raise NotImplementedError
 
-    global_features = repeat(global_features,
-                             utils.diff(row_splits_or_k),
-                             axis=0)
+    global_features = utils.repeat(global_features,
+                                   utils.diff(row_splits_or_k),
+                                   axis=0)
     merged = utils.outer(global_features, coord_features)
     merged = utils.flatten_final_dims(merged, 2)
     return merged

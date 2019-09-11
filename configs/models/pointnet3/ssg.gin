@@ -1,7 +1,7 @@
 include 'base.gin'
 
 pre_batch_map.radii_lists = ((0.2,), (0.4,))
-pre_batch_map.limits_lists = ((32,), (64,))
+pre_batch_map.max_neighbors_lists = ((32,), (64,))
 pre_batch_map.sample_fracs = (0.5, 0.125)
 
 pointnet3_classifier.layer_network_lists = @mlp_recurse()

@@ -1,0 +1,8 @@
+include 'base.gin'
+include '../../../pipelines/tweaks/pointnet2_mixin.gin'
+include '../../../problems/tweaks/pointnet2_mixin.gin'
+include '../../../models/tweaks/wd4e-5.gin'
+batch_size = 8
+
+repeats = 3
+model_dir = '~/deep-cloud-models/very_dense/cls/base-r3-b8-wd-pn2'

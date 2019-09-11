@@ -1,0 +1,42 @@
+import deep_cloud.models.very_dense.core
+import deep_cloud.models.very_dense.poolers
+
+very_dense_features.repeats = %repeats
+very_dense_features.residual_global_features = %residual_global_features
+very_dense_features.residual_node_features = %residual_node_features
+very_dense_features.residual_edge_features = %residual_edge_features
+
+positions_only = False
+
+residual_global_features = False
+residual_node_features = False
+residual_edge_features = False
+
+repeats = 1
+
+pipeline = {
+    'train': @train/map_pipeline(),
+    'validation': @validation/map_pipeline(),
+}
+
+train/map_pipeline.pipeline = @train/Pipeline()
+validation/map_pipeline.pipeline = @validation/Pipeline()
+
+map_pipeline.map_fn = @pre_batch_map
+map_pipeline.post_batch_map_fn = @post_batch_map
+
+compute_edges.depth = %depth
+compute_edges.eager_fn = %eager_fn
+eager_fn = @compute_edges_eager_fn()
+
+compute_edges_eager_fn.radii = @exponential_radii()
+compute_edges_eager_fn.pooler = @SlicePooler()
+exponential_radii.depth = %depth
+compute_edges_eager_fn.depth = %depth
+exponential_radii.r0 = 0.1
+
+get_base_node_network_factories.units_scale = %units_scale
+get_base_extractor.units_scale = %units_scale
+
+depth = 4
+units_scale = 8

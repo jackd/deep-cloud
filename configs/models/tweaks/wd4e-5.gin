@@ -1,0 +1,4 @@
+import more_keras.layers
+import more_keras.keras_configurables
+mk.layers.Dense.kernel_regularizer = @tf.keras.regularizers.l2()
+tf.keras.regularizers.l2.l = 4e-5

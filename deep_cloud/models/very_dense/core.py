@@ -1,44 +1,163 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
-import abc
-import numpy as np
-import tensorflow as tf
 import functools
 import gin
-import itertools
-from scipy.spatial import cKDTree  # pylint: disable=no-name-in-module
+
+import tensorflow as tf
+import numpy as np
+from more_keras.ops import utils as op_utils
 from more_keras.layers import utils as layer_utils
 from more_keras.layers import Dense
-from more_keras.meta_models import builder
 from more_keras.models import mlp
-from more_keras.ops import utils as op_utils
-from more_keras.ragged import np_impl as ra
-from more_keras.ragged.layers import ragged_lambda_call
-from more_keras.ragged.layers import maybe_ragged_lambda_call
-from deep_cloud.ops import ordering
-from deep_cloud.ops.asserts import assert_flat_tensor, INT_TYPES, FLOAT_TYPES
-from deep_cloud.ops.np_utils import tree_utils
-from deep_cloud.ops.np_utils import cloud as np_cloud
+
 from deep_cloud.ops.np_utils import ordering as np_ordering
-from deep_cloud.layers import query
-from deep_cloud.layers.cloud import get_relative_coords
-from deep_cloud.models.very_dense import extractors
-from deep_cloud.models.very_dense import poolers
+from deep_cloud.ops.np_utils.tree_utils import spatial
 from deep_cloud.models.very_dense import utils
-from deep_cloud.models.very_dense.reshaper import Reshaper
+from deep_cloud.models.very_dense import poolers
+from deep_cloud.models.very_dense import extractors
 
-Lambda = tf.keras.layers.Lambda
+from deep_cloud.ops.np_utils.tree_utils import core
+from deep_cloud.ops.np_utils import cloud as np_cloud
 
-SQRT_2 = np.sqrt(2)
+from deep_cloud.ops.np_utils.tree_utils import pykd
+from deep_cloud.ops.np_utils.tree_utils import spatial
+from deep_cloud.ops.np_utils.tree_utils import skkd
+# from pykdtree.kdtree import KDTree  # pylint: disable=no-name-in-module
+
+from more_keras.framework import pipelines
+from more_keras.framework.problems import get_current_problem
+from more_keras import spec
+import collections
+
+DEFAULT_TREE = pykd.KDTree
+# DEFAULT_TREE = spatial.KDTree
 
 
-def get_exponential_radii(depth=4, r0=0.1, expansion_rate=2):
+@gin.configurable
+def exponential_radii(depth=4, r0=1., expansion_rate=2):
     return r0 * expansion_rate**np.arange(depth)
 
 
-def compute_edges_eager(coords, normals, radii, pooler, reorder=False):
+def rejection_sample_lazy(tree, points, radius, k0):
+    N = points.shape[0]
+    out = []
+    consumed = np.zeros((N,), dtype=np.bool)
+    for i in range(N):
+        if not consumed[i]:
+            out.append(i)
+            indices = tree.query_ball_point(np.expand_dims(points[i], 0),
+                                            radius,
+                                            approx_neighbors=k0)
+            indices = indices[0]
+            consumed[indices] = True
+    return out
+
+
+@gin.configurable
+def compute_edges_principled_eager_fn(depth=4, k0=16, tree_impl=DEFAULT_TREE):
+    return functools.partial(
+        compute_edges_principled_eager,
+        depth=depth,
+        k0=k0,
+        tree_impl=tree_impl,
+    )
+
+
+def compute_edges_principled_eager(coords,
+                                   normals,
+                                   depth=4,
+                                   k0=16,
+                                   tree_impl=DEFAULT_TREE):
+
+    coords = coords.numpy() if hasattr(coords, 'numpy') else coords
+    normals = normals.numpy() if hasattr(normals, 'numpy') else normals
+
+    tree = tree_impl(coords)
+    dists, indices = tree.query(tree.data, 2, return_distance=True)
+    # closest = np.min(dists[:, 1])
+    scale = np.mean(dists[:, 1])
+    assert (scale > 0)
+    coords *= (2 / scale)
+
+    # coords is now a packing of barely-intersecting spheres of radius 1.
+    all_coords = [coords]
+    all_normals = [normals]
+    tree = tree_impl(coords)
+    trees = [tree]
+
+    base_coords = coords
+    base_tree = tree
+    base_normals = normals
+
+    # perform sampling, build trees
+    radii = 4 * np.power(2, np.arange(depth))
+    ## Rejection sample on original cloud
+    for i, radius in enumerate(radii[:-1]):
+        indices = rejection_sample_lazy(base_tree,
+                                        base_coords,
+                                        radius,
+                                        k0=k0 * 4**i)
+        coords = base_coords[indices]
+        tree = tree_impl(coords)
+
+        all_coords.append(coords)
+        all_normals.append(base_normals[indices])
+        trees.append(tree)
+
+    # compute edges
+    flat_node_indices = utils.lower_triangular(depth)
+    flat_rel_coords = utils.lower_triangular(depth)
+    row_splits = utils.lower_triangular(depth)
+
+    for i in range(depth):
+        for j in range(i + 1):
+            indices = trees[j].query_ball_point(all_coords[i],
+                                                radii[i],
+                                                approx_neighbors=k0 *
+                                                4**(i - j))
+            flat_node_indices[i][j] = fni = indices.flat_values.astype(np.int64)
+            row_splits[i][j] = indices.row_splits.astype(np.int64)
+
+            # compute flat_rel_coords
+            # this could be done outside the py_function, but it uses np.repeat
+            # which is faster than tf.repeat on cpu.
+            flat_rel_coords[i][j] = np_cloud.get_relative_coords(
+                all_coords[j],
+                all_coords[i],
+                fni,
+                row_lengths=indices.row_lengths)
+
+    return (all_coords, all_normals, flat_rel_coords, flat_node_indices,
+            row_splits)
+
+
+@gin.configurable
+def compute_edges_eager_fn(depth=4,
+                           radii=None,
+                           pooler=None,
+                           reorder=False,
+                           tree_impl=DEFAULT_TREE):
+    if radii is None:
+        radii = exponential_radii(r0=0.1, depth=depth)
+    else:
+        assert (len(radii) == depth)
+    if pooler is None:
+        pooler = poolers.SlicePooler()
+
+    return functools.partial(compute_edges_eager,
+                             radii=radii,
+                             pooler=pooler,
+                             reorder=reorder,
+                             tree_impl=tree_impl)
+
+
+def compute_edges_eager(coords,
+                        normals,
+                        radii,
+                        pooler,
+                        reorder=False,
+                        tree_impl=DEFAULT_TREE):
     """
     Recursively sample the input cloud and find edges based on ball searches.
 
@@ -48,26 +167,14 @@ def compute_edges_eager(coords, normals, radii, pooler, reorder=False):
         normals: [N_0, num_features] numpy array of node features.
         radii: [depth] numpy array or eager tensor of radii for ball searches.
         pooler: `Pooler` instance.
+        tree_impl: KDTree implementation.
 
     Returns:
-        all_coords: [depth] list of numpy coordinate arrays of shape
-            [N_i, num_dims]
-        all_normals: [depth] list of numpy node features of shape
-            [N_i, num_features]
-        flat_rel_coords: flat values in rel_coords (see below)
-        flat_node_indices: flat values in node_indices (see below)
-        row_splits: row splits for rel_coords, node_indices (see below)
-
-    The following aren't actually returned but are easier to describe this way.
-        rel_coords: [depth, <=depth] list of lists of [N_i, k?, num_dims]
-            floats, where k is the number of neighbors (ragged).
-            `rel_coords[i][j][p]` (k?, num_dims) dives the relative coordinates
-            of all points in cloud `j` in the neighborhood of point `p` in cloud
-            `i`.
-        node_indices: [depth, <=depth] list of lists of [N_i, k?] ints.
-            see below. `node_indices[i][j][p] == (r, s, t)` indicates that
-            node `p` in cloud `i` neighbors nodes `r, s, t` in cloud `j`.
+        See `compute_edges` return values.
     """
+    from deep_cloud.ops.np_utils import tree_utils
+    from deep_cloud.ops.np_utils import cloud as np_cloud
+    depth = len(radii)
     # accomodate eager coords tensor, so can be used with tf.py_functions
     if hasattr(coords, 'numpy'):
         coords = coords.numpy()
@@ -81,9 +188,12 @@ def compute_edges_eager(coords, normals, radii, pooler, reorder=False):
     if reorder:
         indices = np_ordering.iterative_farthest_point_ordering(
             coords, coords.shape[0] // 2)
-        coords, normals = np_ordering.partial_reorder(indices, coords, normals)
+        if normals is None:
+            coords = np_ordering.partial_reorder(indices, coords)
+        else:
+            coords, normals = np_ordering.partial_reorder(
+                indices, coords, normals)
 
-    depth = len(radii)
     node_indices = utils.lower_triangular(depth)
     trees = [None for _ in range(depth)]
     all_coords = [coords]
@@ -93,26 +203,34 @@ def compute_edges_eager(coords, normals, radii, pooler, reorder=False):
     # we can do it with `depth`. When depth is 4 it's not that big a saving...
 
     # do the edges diagonal and build up coordinates
+    # print('---')
     for i, radius in enumerate(radii[:-1]):
-        tree = trees[i] = cKDTree(coords)
-        indices = node_indices[i][i] = tree_utils.query_pairs(tree, radius)
+        tree = trees[i] = tree_impl(coords)
+        indices = node_indices[i][i] = tree.query_pairs(radius,
+                                                        approx_neighbors=16 *
+                                                        2**i)
+        # print(radius, tree.n)
+        # print(np.mean(indices.row_lengths))
         coords, normals, indices = pooler(coords, normals, indices)
         # node_indices[i + 1][i] = indices
         all_coords.append(coords)
         all_normals.append(normals)
 
     # final cloud
-    tree = trees[-1] = cKDTree(coords)
-    node_indices[-1][-1] = tree_utils.query_pairs(tree, radii[-1])
-    # We have all trees and node_indices [i, i] # not longer [i, i + 1]
+    tree = trees[-1] = tree_impl(coords)
+    node_indices[-1][-1] = tree.query_pairs(radii[-1],
+                                            approx_neighbors=16 *
+                                            2**(depth - 1))
 
     # do below the diagonal, i.e. [i, j], i > j + 1
     for i in range(1, depth):
         in_tree = trees[i]
         radius = radii[i]
         for j in range(i):
-            node_indices[i][j] = tree_utils.query_ball_tree(
-                trees[j], in_tree, radius)
+            node_indices[i][j] = in_tree.query_ball_tree(trees[j],
+                                                         radius,
+                                                         approx_neighbors=16 *
+                                                         2**(2 * i - j))
 
     # TODO: Should be able to do the following in `depth` `rel_coords` calls
     # Currently uses `depth * (depth + 1) // 2`.
@@ -126,35 +244,76 @@ def compute_edges_eager(coords, normals, radii, pooler, reorder=False):
                 indices.flat_values,
                 row_lengths=indices.row_lengths)
 
-    flat_node_indices = tf.nest.map_structure(lambda x: x.flat_values,
-                                              node_indices)
-    row_splits = tf.nest.map_structure(lambda x: x.row_splits, node_indices)
+    flat_node_indices = tf.nest.map_structure(
+        lambda x: x.flat_values.astype(np.int64), node_indices)
+    row_splits = tf.nest.map_structure(lambda x: x.row_splits.astype(np.int64),
+                                       node_indices)
 
-    return (all_coords, all_normals, flat_rel_coords, flat_node_indices,
-            row_splits)
-
-
-def compute_edges(coords, normals, radii, pooler, reorder=False):
-    """Graph-mode wrapper for compute_edges_eager. Same inputs/outputs."""
-    if tf.executing_eagerly():
-        (all_coords, all_normals, flat_rel_coords, flat_node_indices,
-         row_splits) = compute_edges_eager(coords,
-                                           normals,
-                                           radii,
-                                           pooler,
-                                           reorder=reorder)
+    if normals is None:
+        return (all_coords, flat_rel_coords, flat_node_indices, row_splits)
     else:
+        return (all_coords, all_normals, flat_rel_coords, flat_node_indices,
+                row_splits)
 
-        def fn(args):
-            coords, normals = args
-            out = compute_edges_eager(coords,
-                                      normals,
-                                      radii,
-                                      pooler,
-                                      reorder=reorder)
-            return tf.nest.flatten(out)
 
-        depth = len(radii)
+def _flatten_output(fn, *args, **kwargs):
+    return tf.nest.flatten(fn(*args, **kwargs))
+
+
+@gin.configurable
+def compute_edges(coords, normals, depth=4, eager_fn=None):
+    """
+    Graph-mode wrapper for compute_edges implementation.
+
+    Recursively sample the input cloud and find edges based on ball searches.
+
+    Args:
+        coords: [N_0, num_dims] numpy array or eager tensor of cloud
+            coordinates.
+        normals: [N_0, num_features] numpy array of node features.
+        eager_fn: function mapping eager versions of coords, normals, depth
+            to outputs described below.
+
+    Returns:
+        all_coords: [depth] list of numpy coordinate arrays of shape
+            [N_i, num_dims]
+        all_normals: [depth] list of numpy node features of shape
+            [N_i, num_features]
+        flat_rel_coords: flat values in rel_coords (see below)
+        flat_node_indices: flat values in node_indices (see below)
+        row_splits: row splits for rel_coords, node_indices (see below)
+
+    The following aren't actually returned but are easier to describe this way.
+        rel_coords: [depth, <=depth] list of lists of [N_i, k?, num_dims]
+            floats, where k is the number of neighbors (ragged).
+            `rel_coords[i][j][p]` (k?, num_dims) gives the relative coordinates
+            of all points in cloud `i` in the neighborhood of point `p` in cloud
+            `j`.
+        node_indices: [depth, <=depth] list of lists of [N_i, k?] ints.
+            see below. `node_indices[i][j][p] == (r, s, t)` indicates that
+            node `p` in cloud `j` neighbors nodes `r, s, t` in cloud `i`.
+    """
+    if eager_fn is None:
+        eager_fn = compute_edges_eager_fn()
+    if tf.executing_eagerly():
+        return eager_fn(coords, normals)
+
+    py_func = functools.partial(eager_fn, depth=depth)
+    if normals is None:
+        Tout = (
+            [tf.float32] * depth,  # coords
+            utils.lower_triangular(depth, tf.float32),  # flat_rel_coords
+            utils.lower_triangular(depth, tf.int64),  # flat_node_indices
+            utils.lower_triangular(depth, tf.int64),  # row_splits
+        )
+        Tout_flat = tf.nest.flatten(Tout)
+        # out_flat = tf.py_function(fn, [coords, normals], Tout_flat)
+        out_flat = tf.py_function(py_func, [coords], Tout_flat)
+
+        (all_coords, flat_rel_coords, flat_node_indices,
+         row_splits) = tf.nest.pack_sequence_as(Tout, out_flat)
+        all_normals = None
+    else:
         Tout = (
             [tf.float32] * depth,  # coords
             [tf.float32] * depth,  # normals
@@ -163,171 +322,161 @@ def compute_edges(coords, normals, radii, pooler, reorder=False):
             utils.lower_triangular(depth, tf.int64),  # row_splits
         )
         Tout_flat = tf.nest.flatten(Tout)
-        out_flat = Lambda(lambda c: tf.py_function(fn, [c], Tout_flat))(
-            [coords, normals])
+        # out_flat = tf.py_function(fn, [coords, normals], Tout_flat)
+        out_flat = tf.py_function(py_func, [coords, normals], Tout_flat)
+
         (all_coords, all_normals, flat_rel_coords, flat_node_indices,
          row_splits) = tf.nest.pack_sequence_as(Tout, out_flat)
 
     # fix sizes
     num_dims = coords.shape[1]
-    num_features = normals.shape[1]
-    sizes = [coords.shape[0]]
+    # num_features = normals.shape[1]
+    # sizes = [coords.shape[0]]
     # even if size is None, we still get rank information from the below
-    for _ in range(depth - 1):
-        sizes.append(pooler.output_size(sizes[-1]))
+    # pooler = poolers.SlicePooler()
+    # for _ in range(depth - 1):
+    #     sizes.append(pooler.output_size(sizes[-1]))
+    sizes = [None] * 4
 
     for i in range(depth):
         size = sizes[i]
         all_coords[i].set_shape((size, num_dims))
-        all_normals[i].set_shape((size, num_features))
+        if normals is not None:
+            all_normals[i].set_shape((size, normals.shape[1]))
         for rc in flat_rel_coords[i]:
             rc.set_shape((None, num_dims))
         for ni in flat_node_indices[i]:
             ni.set_shape((None,))
         for rs in row_splits[i]:
-            rs.set_shape((size + 1,))
+            rs.set_shape((None if size is None else (size + 1),))
 
     return (all_coords, all_normals, flat_rel_coords, flat_node_indices,
             row_splits)
 
 
-def batch_row_splits(row_splits):
-    # we convert row_splits -> row_lengths, batch, flatten, then convert back.
-    assert (row_splits.shape[0] is not None)
-    row_lengths = layer_utils.diff(row_splits)
-    row_lengths = builder.batched(row_lengths)
-    row_lengths = layer_utils.flatten_leading_dims(row_lengths)
-    row_splits = layer_utils.row_lengths_to_splits(row_lengths)
-    return row_splits
+@gin.configurable(blacklist=['features', 'labels', 'weights'])
+def pre_batch_map(features,
+                  labels,
+                  weights=None,
+                  shuffle=False,
+                  edge_fn=compute_edges):
 
-
-def compute_batched_edges(coords, normals, radii, pooler, reorder=False):
-    """
-    Args:
-        coords: [n, num_dims] float tensor of unbatched coords.
-        normals: [n, f] float tensor of unbatched node features.
-        radii: [K]-length list of ball search radii.
-        pooler: `poolers.Pooler` instance.
-
-    Returns:
-        all_coords: K-length list of [N, num_dims] float tensor of
-            flattened batched coordinates for each set.
-        all_normals: K-length list of [N, f] float tensor of flattened
-            batched node features for each set.
-        flat_node_indices: [K, <=K] llist int into returned all_*
-        flat_rel_coords: [K, <=K] llist
-        row_splits: [K, <=K] llist of ints denoting ragged structure of flat_*.
-            row_splits[i][j] is of size [N]
-    """
-    all_coords, all_normals, flat_rel_coords, flat_node_indices, row_splits = \
-        compute_edges(
-            coords, normals, radii=radii, pooler=pooler, reorder=reorder)
-
-    def flat_batch(tensor):
+    def flat_values(tensor):
         if isinstance(tensor, tf.RaggedTensor):
-            tensor = tensor.flat_values
+            return tensor.flat_values
         else:
-            assert (tensor.shape[0] is None)
+            return tensor
 
-        tensor = builder.batched(tensor)
-        return tensor.flat_values
+    if isinstance(features, dict):
+        coords = flat_values(features['positions'])
+        normals = flat_values(features['normals'])
+    else:
+        coords = flat_values(features)
+        normals = None
+    class_masks = (features.get('class_masks')
+                   if isinstance(features, dict) else None)
+    if shuffle:
+        indices = tf.random.shuffle(tf.range(tf.shape(coords)[0]))
+        coords = tf.gather(coords, indices)
+        if normals is not None:
+            normals = tf.gather(normals, indices)
 
-    row_splits = tf.nest.map_structure(batch_row_splits, row_splits)
-    flat_rel_coords = tf.nest.map_structure(flat_batch, flat_rel_coords)
-    flat_node_indices = tf.nest.map_structure(flat_batch, flat_node_indices)
-    sizes = builder.batched([layer_utils.leading_dim(c) for c in all_coords])
+    all_coords, all_normals, flat_rel_coords, flat_node_indices, row_splits = \
+        edge_fn(coords, normals)
 
-    outer_row_splits = [layer_utils.row_lengths_to_splits(s) for s in sizes]
+    rel_coords = tf.nest.map_structure(
+        lambda rc, rs: tf.RaggedTensor.from_row_splits(rc, rs), flat_rel_coords,
+        row_splits)
+    node_indices = tf.nest.map_structure(
+        lambda ni, rs: tf.RaggedTensor.from_row_splits(ni, rs),
+        flat_node_indices, row_splits)
 
-    if not all([c.shape[0] is not None] for c in all_coords):
-        raise NotImplementedError
+    all_coords = tuple(all_coords)
+    if normals is not None:
+        all_normals = tuple(all_normals)
+    rel_coords = utils.ttuple(rel_coords)
+    node_indices = utils.ttuple(node_indices)
 
-    all_coords, all_normals = tf.nest.map_structure(builder.batched,
-                                                    (all_coords, all_normals))
+    # make ragged so batching knows.
+    all_coords, all_normals = tf.nest.map_structure(
+        lambda x: None if x is None else tf.RaggedTensor.from_tensor(
+            tf.expand_dims(x, axis=0)), (all_coords, all_normals))
 
-    return (
-        all_coords,
-        all_normals,
-        flat_rel_coords,
-        flat_node_indices,
-        row_splits,
-        outer_row_splits,
+    features = dict(
+        all_coords=all_coords,
+        all_normals=all_normals,
+        rel_coords=rel_coords,
+        node_indices=node_indices,
     )
+    if normals is None:
+        del features['all_normals']
+    if class_masks is not None:
+        features['class_masks'] = class_masks
+
+    return ((features, labels) if weights is None else
+            (features, labels, weights))
 
 
-def flatten_edges(all_coords, all_normals, flat_rel_coords, flat_node_indices,
-                  row_splits, outer_row_splits):
-    """
-    TODO: update
+@gin.configurable
+def post_batch_map(features, labels, weights=None):
+    all_coords, rel_coords, node_indices = (
+        features[k] for k in ('all_coords', 'rel_coords', 'node_indices'))
+    # remove redundant ragged dimension added for batching purposes.
+    all_coords = tf.nest.map_structure(
+        lambda x: tf.RaggedTensor.from_nested_row_splits(
+            x.flat_values, x.nested_row_splits[1:]), all_coords)
+    offsets = [op_utils.get_row_offsets(c) for c in all_coords]
+    outer_row_splits = tuple(op_utils.get_row_splits(c) for c in all_coords)
+    row_splits = tf.nest.map_structure(lambda rt: rt.nested_row_splits[1],
+                                       node_indices)
 
-    Flatten batched data into a single graph.
+    all_coords = tf.nest.map_structure(layer_utils.flatten_leading_dims,
+                                       all_coords)
 
-    Args:
-        all_coords: [K] [B, n?, 3] possibly ragged coordinates.
-        all_normals: [K] [B, n?, 3] possibly ragged normals.
-        rel_coords: [K, <=K] [B, n?, k?, 3] ragged relative coordinates.
-        node_indices: [K, <=K] [B, n?, k?] ragged neighborhoods.
+    flat_rel_coords = tf.nest.map_structure(lambda x: x.flat_values, rel_coords)
 
-    Returns:
-        all_coords: [K] [N, 3] float flat coordinates
-        all_normals: [K] [N, 3] float flat normals
-        rel_coords: [K, <=K] [M, 3] float flat relative coordinates
-        node_indices: [K, <=K] [M,] int flat neighborhoords into flattened
-            coords/normals.
-        nested_row_splits: [K, <=K] [B+1], [N+1] int
-            nested row splits from node_indices.
-    """
-    offsets = [layer_utils.get_row_offsets(c) for c in all_coords]
-    all_coords = [layer_utils.flatten_leading_dims(c) for c in all_coords]
-    all_normals = [layer_utils.flatten_leading_dims(n) for n in all_normals]
-
-    K = len(offsets)
+    K = len(all_coords)
+    flat_node_indices = utils.lower_triangular(K)
     for i in range(K):
         for j in range(i + 1):
             flat_node_indices[i][j] = layer_utils.apply_row_offset(
-                tf.RaggedTensor.from_nested_row_splits(
-                    flat_node_indices[i][j],
-                    [outer_row_splits[i], row_splits[i][j]]),
-                offsets[j]).flat_values
+                node_indices[i][j], offsets[j]).flat_values
+    flat_node_indices = utils.ttuple(flat_node_indices)
 
-    # nested_row_splits = tf.nest.map_structure(
-    #     tf.keras.layers.Lambda(lambda ni: ni.nested_row_splits), node_indices)
-    # flat_rel_coords, flat_node_indices = tf.nest.map_structure(
-    #     lambda ni: ni.flat_values, (rel_coords, node_indices))
-    return (
-        all_coords,
-        all_normals,
-        flat_rel_coords,
-        flat_node_indices,
-        row_splits,
-        outer_row_splits,
-    )
+    all_coords = tuple(all_coords)
 
+    class_index = features.get('class_index')
+    class_masks = features.get('class_masks')
 
-def fps_reorder(coords, *args, sample_frac=0.25):
+    features = dict(all_coords=all_coords,
+                    flat_rel_coords=flat_rel_coords,
+                    flat_node_indices=flat_node_indices,
+                    row_splits=row_splits,
+                    outer_row_splits=outer_row_splits)
 
-    def _fps_reorder(args, sample_frac=0.25):
-        coords, *args = args
-        num_points = op_utils.leading_dim(coords, dtype=tf.int64)
-        num_points_f = tf.cast(num_points, dtype=tf.float32)
-        num_samples = tf.cast(num_points_f * sample_frac, tf.int64)
-        indices = ordering.iterative_farthest_point_order(coords, num_samples)
-        return list(ordering.partial_reorder(indices, coords, *args))
+    all_normals = features.get('all_normals')
+    if all_normals is not None:
+        all_normals = tf.nest.map_structure(
+            lambda x: tf.RaggedTensor.from_nested_row_splits(
+                x.flat_values, x.nested_row_splits[1:]), all_normals)
+        all_normals = tf.nest.map_structure(layer_utils.flatten_leading_dims,
+                                            all_normals)
+        all_normals = tuple(all_normals)
+        features['all_normals'] = all_normals
 
-    return tf.keras.layers.Lambda(_fps_reorder,
-                                  arguments=dict(sample_frac=sample_frac))(
-                                      (coords, *args))
+    if class_index is not None:
+        features['class_index'] = class_index
+    if class_masks is not None:
+        features['class_masks'] = class_masks
 
+    labels, weights = get_current_problem().post_batch_map(labels, weights)
+    if isinstance(labels, tf.Tensor) and labels.shape.ndims == 2:
+        assert (isinstance(weights, tf.Tensor) and weights.shape.ndims == 2)
+        labels = tf.reshape(labels, (-1,))
+        weights = tf.reshape(weights, (-1,))
 
-def get_base_node_network_factories(num_factories=4,
-                                    units_scale=8,
-                                    unit_expansion_factor=2,
-                                    network_depth=2):
-    return [
-        functools.partial(mlp,
-                          units=[4 * units_scale * unit_expansion_factor**i] *
-                          network_depth) for i in range(num_factories)
-    ]
+    return ((features, labels) if weights is None else
+            (features, labels, weights))
 
 
 def _ragged_reduction(args, reduction):
@@ -347,75 +496,88 @@ def apply_ragged_reduction(flat_values, row_splits_or_k, reduction):
                                           [flat_values, row_splits_or_k])
 
 
-def get_base_global_network(units=(512, 256), dropout_impl=None):
-    return functools.partial(mlp, units=units, dropout_impl=dropout_impl)
+@gin.configurable
+def get_base_node_network_factories(num_factories=4,
+                                    units_scale=4,
+                                    unit_expansion_factor=2,
+                                    network_depth=2):
+    return [
+        functools.partial(mlp,
+                          units=[4 * units_scale * unit_expansion_factor**i] *
+                          network_depth) for i in range(num_factories)
+    ]
 
 
 @gin.configurable
-def very_dense_classifier(
-        input_spec,
-        output_spec,
-        sample_frac=0.25,
-        resolution_depth=4,
+def get_base_global_network(units=(512, 256), dropout_impl=None):
+    return mlp(units=units, dropout_impl=dropout_impl)
+
+
+EmbeddingSpec = gin.external_configurable(
+    collections.namedtuple('EmbeddingSpec', ['input_dim', 'output_dim']))
+
+
+def add_residual(inp, output, dense_factory=Dense):
+    if inp.shape[-1] != output.shape[-1]:
+        inp = dense_factory(output.shape[-1])(inp)
+    return tf.add_n([inp, output])
+
+
+@gin.configurable(blacklist=['inputs'])
+def very_dense_features(
+        inputs,
         repeats=3,
-        pooler_factory=poolers.SlicePooler,
-        reorder=True,
+        global_embedding_spec=None,
         extractor_factory=extractors.get_base_extractor,
         node_network_factories=None,
         global_network_factory=get_base_global_network,
-        dense_factory=Dense,
-        concat_features=True,
+        residual_global_features=False,
+        residual_node_features=False,
+        residual_edge_features=False,
         reduction=tf.reduce_max,
+        dense_factory=Dense,
 ):
-
-    def input_from_spec(spec):
-        return builder.prebatch_input(shape=spec.shape, dtype=spec.dtype)
-
-    if isinstance(input_spec, dict):
-        coords = input_from_spec(input_spec['positions'])
-        normals = input_from_spec(input_spec['normals'])
-    else:
-        coords = input_from_spec(input_spec)
-        normals = None
-
-    if node_network_factories is None:
-        node_network_factories = get_base_node_network_factories(
-            resolution_depth)
-
-    radii = get_exponential_radii(depth=resolution_depth)
-
-    if reorder:
-        coords, normals = fps_reorder(coords, normals)
-
-    batched_edges = compute_batched_edges(coords, normals, radii,
-                                          pooler_factory(sample_frac))
     (
         all_coords,
-        all_normals,
         flat_rel_coords,
         flat_node_indices,
         row_splits,
         outer_row_splits,
-    ) = builder.as_model_input(flatten_edges(*batched_edges))
+    ) = (inputs[k] for k in (
+        'all_coords',
+        'flat_rel_coords',
+        'flat_node_indices',
+        'row_splits',
+        'outer_row_splits',
+    ))
+    all_normals = inputs.get('all_normals')
+    if node_network_factories is None:
+        node_network_factories = get_base_node_network_factories(
+            len(all_coords))
 
-    preds = []
-    num_classes = output_spec.shape[-1]
     sizes = [layer_utils.leading_dim(c) for c in all_coords]
 
-    def get_extractor():
-        return extractor_factory(sizes, flat_node_indices, row_splits)
+    inp_node_features = None if all_normals is None else tuple(all_normals)
+    inp_edge_features = utils.ttuple(flat_rel_coords)
+    if global_embedding_spec is None:
+        inp_global_features = None
+    else:
+        inp_global_features = tf.keras.layers.Embedding(
+            global_embedding_spec.input_dim,
+            global_embedding_spec.output_dim)(inputs['class_index'])
 
-    inp_node_features = all_normals
-    inp_edge_features = flat_rel_coords
-    inp_global_features = None
+    all_node_features = []
+    all_edge_features = []
+    all_global_features = []
 
-    for _ in range(repeats + 1):
-        node_features, edge_features = get_extractor()(
-            inp_node_features,
-            inp_edge_features,
-            #    global_features,
-            #    all_coords,
-        )
+    for i in range(repeats + 1):
+        node_features, edge_features = extractor_factory(
+            sizes, flat_node_indices, row_splits, outer_row_splits)(
+                inp_node_features,
+                inp_edge_features,
+                inp_global_features,
+                all_coords if i == 0 else None,
+            )
 
         node_features = [
             network_factory()(n)  # fresh model each time
@@ -425,134 +587,99 @@ def very_dense_classifier(
             apply_ragged_reduction(n, rs, reduction)
             for (n, rs) in zip(node_features, outer_row_splits)
         ]
-        if inp_global_features is not None:
-            global_features.append(inp_global_features)
-        global_features = layer_utils.concat(global_features, axis=-1)
-        global_features = global_network_factory()(global_features)
-        preds.append(Dense(num_classes, activation=None)(global_features))
+        global_features = tf.concat(global_features, axis=-1)
+
+        if global_network_factory is not None:
+            global_features = global_network_factory()(global_features)
+
+        node_features = tuple(node_features)
+        edge_features = utils.ttuple(edge_features)
+
+        if inp_global_features is not None and residual_global_features:
+            global_features = add_residual(inp_global_features, global_features,
+                                           dense_factory)
+
+        if residual_node_features:
+            node_features = tf.nest.map_structure(
+                lambda inp, out: add_residual(inp, out, dense_factory),
+                inp_node_features, node_features)
+        if residual_edge_features:
+            edge_features = tf.nest.map_structure(
+                lambda inp, out: add_residual(inp, out, dense_factory),
+                inp_edge_features, edge_features)
+
         inp_node_features = node_features
         inp_edge_features = edge_features
         inp_global_features = global_features
 
-    return builder.model(preds)
+        all_node_features.append(inp_node_features)
+        all_edge_features.append(inp_edge_features)
+        all_global_features.append(inp_global_features)
+
+    return all_node_features, all_edge_features, all_global_features
+
+
+@gin.configurable
+def very_dense_classifier(input_spec,
+                          output_spec,
+                          dense_factory=Dense,
+                          features_factory=very_dense_features):
+    num_classes = output_spec.shape[-1]
+    inputs = spec.inputs(input_spec)
+    node_features, edge_features, global_features = features_factory(inputs)
+    del node_features, edge_features
+    preds = []
+    for gf in global_features:
+        if gf is not None:
+            preds.append(dense_factory(num_classes, activation=None)(gf))
+
+    return tf.keras.Model(inputs=tf.nest.flatten(inputs), outputs=preds)
+
+
+def _from_row_splits(args):
+    return tf.RaggedTensor.from_row_splits(*args)
+
+
+@gin.configurable
+def very_dense_semantic_segmenter(input_spec,
+                                  output_spec,
+                                  dense_factory=Dense,
+                                  features_factory=very_dense_features):
+    num_classes = output_spec.shape[-1]
+    inputs = spec.inputs(input_spec)
+    class_masks = inputs.pop('class_masks', None)
+    node_features, edge_features, global_features = features_factory(inputs)
+    del edge_features, global_features
+    node_features = [nf[0] for nf in node_features]  # high res features
+    preds = [dense_factory(num_classes)(n) for n in node_features]
+    if_false = tf.fill(tf.shape(preds[0]),
+                       value=tf.constant(-np.inf, dtype=tf.float32))
+    outer_row_splits = inputs['outer_row_splits'][0]
+    outer_row_lengths = op_utils.diff(outer_row_splits)
+    if class_masks is not None:
+        class_masks = tf.repeat(class_masks, outer_row_lengths, axis=0)
+        preds = [tf.where(class_masks, pred, if_false) for pred in preds]
+    # from_row_splits = tf.keras.layers.Lambda(_from_row_splits)
+    # preds = [from_row_splits([pred, outer_row_splits]) for pred in preds]
+    return tf.keras.Model(inputs=tf.nest.flatten(inputs), outputs=preds)
 
 
 if __name__ == '__main__':
-    from absl import logging
+    from more_keras.ragged import np_impl as ra
+    import functools
 
-    def make_normals():
-        normals = np.random.randn(n, 3).astype(np.float32)
-        normals /= np.linalg.norm(normals, axis=-1, keepdims=True)
-        return normals
-
-    do_profile = False
-    do_dataset_profile = False
-    vis_single = False
-    vis_batched = False
-
-    # do_profile = True
-    # do_dataset_profile = True
-    # vis_single = True
-    vis_batched = True
-
-    depth = 4
-    sample_frac = 0.25
-    n = 1024
-    # n = 512
-    logging.set_verbosity(logging.INFO)
-    base_coords = np.random.uniform(size=(n, 3)).astype(np.float32)
-    base_coords[:, 2] = 0
-    indices = np_ordering.iterative_farthest_point_ordering(base_coords)
-    base_coords = base_coords[indices]
-    scale_factor = np.mean(
-        cKDTree(base_coords).query(base_coords,
-                                   k=11)[0][:, -1])  # mean 10th neighbor
-    base_coords /= scale_factor  # now the 10th neighbor is on average 1 unit away
-    base_normals = make_normals()
-
-    radii = get_exponential_radii(r0=1)
-    # pooler = poolers.InverseDensitySamplePooler(sample_frac)
-    pooler = poolers.SlicePooler(sample_frac)
-
-    # if do_profile:
-    #     # super simple profiling
-    #     import tqdm
-    #     from time import time
-    #     num_runs = 100
-    #     dt = 0
-    #     logging.info('Running basic profiling')
-    #     for _ in tqdm.tqdm(range(num_runs)):
-    #         coords = np.random.uniform(size=(n, 3)).astype(np.float32)
-    #         coords[:, 2] = 0
-    #         coords /= scale_factor
-    #         normals = make_normals()
-    #         t = time()
-    #         compute_edges_eager(coords, normals, radii=radii, pooler=pooler)
-    #         dt += time() - t
-    #     logging.info('Completed {} runs in {:.2f}s, {:.1f} runs / s'.format(
-    #         num_runs, dt, num_runs / dt))
-
-    # if do_dataset_profile:
-    #     # simple profiling for dataset
-    #     import tqdm
-    #     from time import time
-    #     warm_up = 10
-    #     num_runs = 50
-    #     batch_size = 16
-    #     reorder = True
-    #     logging.info('Running dataset profiling')
-
-    #     def gen():
-    #         while True:
-    #             coords = np.random.uniform(size=(n, 3)).astype(np.float32)
-    #             coords[:, 2] = 0
-    #             coords /= scale_factor
-    #             normals = make_normals()
-    #             labels = np.ones((), dtype=np.int64)
-    #             yield (coords, normals), labels
-
-    #     with tf.Graph().as_default():  # pylint: disable=not-context-manager
-    #         dataset = tf.data.Dataset.from_generator(
-    #             gen, ((tf.float32, tf.float32), tf.int64),
-    #             (((n, 3), (n, 3)), ()))
-    #         with builder.MetaNetworkBuilder() as b:
-    #             (coords, normals), labels = b.prebatch_inputs_from(dataset)
-    #             # if reorder:
-    #             #     coords, normals = fps_reorder(coords,
-    #             #                                   normals,
-    #             #                                   sample_frac=sample_frac)
-    #             nested_out = compute_batched_edges(coords,
-    #                                                normals,
-    #                                                radii=radii,
-    #                                                pooler=pooler,
-    #                                                reorder=reorder)
-    #             flat_out = tf.nest.flatten(nested_out)
-    #             # model_inps = [b.as_model_input(f) for f in flat_out]
-    #             labels = b.batched(labels)
-    #         preprocessor = b.preprocessor((labels,))
-    #         dataset = preprocessor.map_and_batch(dataset, batch_size=batch_size)
-    #         out = tf.compat.v1.data.make_one_shot_iterator(dataset).get_next()
-
-    #         with tf.Session() as sess:
-    #             logging.info('Warming up with {} runs, batch_size {}'.format(
-    #                 warm_up, batch_size))
-    #             for _ in tqdm.tqdm(range(warm_up)):
-    #                 sess.run(out)
-    #             logging.info('Starting {} actual runs'.format(num_runs))
-    #             t = time()
-    #             for _ in tqdm.tqdm(range(num_runs)):
-    #                 sess.run(out)
-    #             dt = time() - t
-    #     logging.info(
-    #         'Completed {} runs with batch_size {} in {:.2f}s, {:.1f} runs / s, '
-    #         '{:.1f} examples / s'.format(num_runs, batch_size, dt,
-    #                                      num_runs / dt,
-    #                                      num_runs * batch_size / dt))
-
+    config = '''
+    compute_edges.eager_fn = @compute_edges_principled_eager_fn()
+    '''
+    gin.parse_config(config)
 
     def vis(coords, node_indices, point_indices=None):
         import trimesh
         depth = len(coords)
+
+        scale_factor = np.max(np.linalg.norm(coords[0], axis=-1))
+        for c in coords:
+            c /= scale_factor
         if point_indices is None:
             point_indices = [0] * depth
         for i, point_index in enumerate(point_indices):
@@ -561,7 +688,6 @@ if __name__ == '__main__':
             for j in range(i + 1):
                 cj = coords[j]
                 ni = node_indices[i][j]
-                ni = ra.RaggedArray.from_row_splits(ni.values, ni.row_splits)
                 neighbors = ni[point_index]
                 print(i, j, ci.shape, cj.shape, neighbors.shape)
                 print(np.max(np.linalg.norm(cj[neighbors] - center, axis=-1)))
@@ -571,82 +697,139 @@ if __name__ == '__main__':
                 scene.add_geometry(
                     trimesh.PointCloud(cj[neighbors], color=(255, 0, 0)))
                 scene.add_geometry(
-                    trimesh.primitives.Sphere(center=center, radius=0.2))
+                    trimesh.primitives.Sphere(center=center, radius=0.01))
 
                 scene.show(background=(0, 0, 0))
 
-    # if vis_single:
-    #     coords = base_coords
-    #     normals = base_normals
-    #     coords, normals = fps_reorder(coords, normals)
-    #     coords, normals, flat_rel_coords, flat_node_indices, row_splits = \
-    #         compute_edges(
-    #             coords, normals, radii=radii, pooler=pooler)
-    #     # coords = trimesh.creation.icosphere(7).vertices
-    #     # coords = coords[np.random.choice(coords.shape[0], 2048)]
-    #     # coords = coords[coords[:, 1] > 0]
-    #     # tf.enable_eager_execution()
-    #     coords, normals, flat_rel_coords, flat_node_indices, row_splits = \
-    #         compute_edges(
-    #             tf.constant(base_coords),
-    #             tf.constant(base_normals), radii=radii, pooler=pooler)
-    #     # compute_edges_eager(coords, normals, radii=radii, pooler=pooler)
-    #     with tf.Session() as sess:
-    #         coords, normals, flat_rel_coords, flat_node_indices, row_splits = \
-    #             sess.run(
-    #             (coords, normals, flat_rel_coords, flat_node_indices,
-    #              row_splits))
+    # n_initial = 10000
+    # n = 1024
+    # batch_size = 2
 
-    #     node_indices = tf.nest.map_structure(ra.RaggedArray.from_row_splits,
-    #                                          flat_node_indices, row_splits)
-    #     vis(coords, node_indices)
+    # KDTree = spatial.KDTree
 
-    if vis_batched:
-        # coords = np.random.uniform(size=(2, n, 3)).astype(np.float32)
-        # coords[0, :, 1] = 0
-        # coords[1, :, 1] = 1
-        # coords /= scale_factor
-        coords = np.stack([base_coords, base_coords], axis=0)
-        coords[1, :, 2] = 1
-        normals = np.stack([base_normals, base_normals], axis=0)
-        labels = np.array([0, 1], dtype=np.int64)
-        dataset = tf.data.Dataset.from_tensor_slices(
-            ((coords, normals), labels))
+    # base_coords = np.random.uniform(size=(n_initial, 3)).astype(np.float32)
+    # base_coords[:, 2] = 0
+    # indices = np_ordering.iterative_farthest_point_ordering(base_coords, n)
+    # base_coords = base_coords[indices]
 
-        with builder.MetaNetworkBuilder() as b:
-            coords = b.prebatch_input(shape=(n, 3), dtype=tf.float32)
-            normals = b.prebatch_input(shape=(n, 3), dtype=tf.float32)
+    # scale_factor = np.mean(
+    #     DEFAULT_TREE(base_coords).query(base_coords, 11,
+    #                                     np.inf)[1][:, -1])  # mean 10th neighbor
+    # base_coords /= scale_factor
+    # base_normals = np.random.randn(n, 3).astype(np.float32)
+    # base_normals /= np.linalg.norm(base_normals, axis=-1, keepdims=True)
 
-            coords, normals = fps_reorder(coords, normals)
+    # from timeit import timeit
+    # warm_up = 2
+    # number = 5
 
-            batched_out = compute_batched_edges(coords,
-                                                normals,
-                                                radii=radii,
-                                                pooler=pooler)
+    # princ_fn = functools.partial(compute_edges_principled_eager,
+    #                              base_coords,
+    #                              base_normals,
+    #                              depth=4)
+    # for _ in range(warm_up):
+    #     princ_fn()
+    # t = timeit(princ_fn, number=number)
+    # print('princ: {}'.format(t))
 
-            flattened_out = flatten_edges(*batched_out)
+    # base_fn = functools.partial(compute_edges_eager,
+    #                             base_coords,
+    #                             base_normals,
+    #                             depth=4)
+    # # warm up
+    # for _ in range(warm_up):
+    #     base_fn()
+    # t = timeit(base_fn, number=number)
+    # print('base: {}'.format(t))
 
-            b.as_model_input(flattened_out)
-            # b.as_model_input(batched_out)
-            labels = b.batched(b.prebatch_input(shape=(), dtype=tf.int64))
+    # print('done')
+    # exit()
 
-        preprocessor = b.preprocessor((labels,))
-        dataset = preprocessor.map_and_batch(dataset, batch_size=2)
-        values, labels = tf.compat.v1.data.make_one_shot_iterator(
-            dataset).get_next()
+    # coords = np.stack([base_coords] * 2, axis=0)
+    # coords[1, :, 2] = 1
+    # normals = np.stack([base_normals] * 2, axis=0)
+    # dataset = tf.data.Dataset.from_tensor_slices((dict(positions=coords,
+    #                                                    normals=normals), [0,
+    #                                                                       0]))
 
-        with tf.Session() as sess:
-            values = sess.run(values)
+    from deep_cloud.problems.modelnet import ModelnetProblem
+    from deep_cloud.problems.builders import pointnet_builder
+    import tensorflow_datasets as tfds
+    from time import time
+    from tqdm import tqdm
+    problem = ModelnetProblem(builder=pointnet_builder(2), positions_only=False)
+    dataset = problem.get_base_dataset(split='validation')
+    num_examples = 100
+    batch_size = 2
 
-        (all_coords, all_normals, flat_rel_coords, flat_node_indices,
-         row_splits,
-         outer_row_splits) = tf.nest.pack_sequence_as(flattened_out, values)
+    def profile(edge_fn, depth=4, num_examples=10):
+        times = []
+        for example, _ in tqdm(tfds.as_numpy(dataset.take(num_examples)),
+                               total=num_examples):
+            start = time()
+            edge_fn(example['positions'], example['normals'], depth=depth)
+            times.append(time() - start)
+        return np.array(times)
 
-        node_indices = tf.nest.map_structure(ra.RaggedArray.from_row_splits,
-                                             flat_node_indices, row_splits)
+    # t_base = profile(compute_edges_eager, num_examples=num_examples)
+    # t_princ = profile(compute_edges_principled_eager, num_examples=num_examples)
+    # print('base: {}'.format(np.mean(t_base[4:])))
+    # print('princ: {}'.format(np.mean(t_princ[4:])))
+    # exit()
 
-        point_indices = [rs[1] for rs in outer_row_splits]
-        vis(all_coords, node_indices, point_indices)
-        # for i in range(batch_size)
-        # for i, point_indices in enumerate(zip(*batch_row_offsets)):
-        #     vis(coords, node_indices, point_indices)
+    def profile_dataset(dataset, depth=4, num_examples=10):
+        # cef = functools.partial(compute_edges, eager_fn=edge_fn, depth=depth)
+        # ds = dataset.map(pre_batch_map, -1)
+        # ds = dataset.map(pre_batch_map)
+        # ds = ds.batch(batch_size)
+        # ds = ds.map(post_batch_map)
+        start = time()
+        times = []
+        for _ in tqdm(tfds.as_numpy(dataset.take(num_examples)),
+                      total=num_examples):
+            end = time()
+            times.append(end - start)
+            start = end
+
+        return np.array(times)
+
+    # with gin.unlock_config():
+    #     gin.parse_config('compute_edges.eager_fn = @compute_edges_eager')
+    # edge_fn = functools.partial(compute_edges,
+    #                             eager_fn=compute_edges_principled_eager)
+    # t_base = profile_dataset(dataset.map(pre_batch_map),
+    #                          num_examples=num_examples)
+    with gin.unlock_config():
+        gin.parse_config(
+            'compute_edges.eager_fn = @compute_edges_principled_eager_fn()')
+    t_princ = profile_dataset(dataset.map(pre_batch_map),
+                              num_examples=num_examples)
+    # print('base: {}'.format(np.mean(t_base[num_examples // 2:])))
+    print('princ: {}'.format(np.mean(t_princ[num_examples // 2:])))
+    exit()
+
+    # dataset = dataset.map(pre_batch_map)
+
+    # import tensorflow_datasets as tfds
+    # from tqdm import tqdm
+    # total = 100
+    # for (example, labels) in tqdm(tfds.as_numpy(dataset.take(total)),
+    #                               total=total):
+    #     # compute_edges_principled_eager(example['positions'], example['normals'],
+    #     #                                4)
+    #     pass
+
+    # dataset = dataset.map(pre_batch_map).batch(batch_size).map(post_batch_map)
+
+    # features, labels = tf.compat.v1.data.make_one_shot_iterator(
+    #     dataset).get_next()
+
+    # with tf.Session() as sess:
+    #     features, labels = sess.run((features, labels))
+
+    # (all_coords, all_normals, flat_rel_coords, flat_node_indices, row_splits,
+    #  outer_row_splits) = features
+
+    # node_indices = tf.nest.map_structure(ra.RaggedArray.from_row_splits,
+    #                                      flat_node_indices, row_splits)
+    # vis(all_coords, node_indices)

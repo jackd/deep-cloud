@@ -29,7 +29,7 @@ map_fn = functools.partial(augment_cloud,
 # map2 = pre_batch_map
 map2 = functools.partial(pre_batch_map,
                          radii_lists=((0.1,), (0.2,)),
-                         limits_lists=((16,), (32,)))
+                         max_neighbors_lists=((16,), (32,)))
 
 with tf.device('/cpu:0'):
     dataset = problem.get_base_dataset('train').map(map_fn, -1).map(map2, -1)
@@ -44,14 +44,15 @@ with tf.device('/cpu:0'):
 # dataset = problem.get_base_dataset('train').map(map_fn)
 
 # radii_lists = ((0.1, 0.2, 0.4), (0.2, 0.4, 0.8))
-# limits_lists = ((16, 32, 128), (32, 64, 128))
+# max_neighbors_lists = ((16, 32, 128), (32, 64, 128))
 
 # t = time()
 # for features, labels in tqdm(dataset.take(N), total=N):
 #     coords = features['positions']
 #     all_coords = [coords, coords[:512], coords[:128]]
 #     trees = [tree_utils.KDTree(c) for c in all_coords]
-#     for i, (radii, limits) in enumerate(zip(radii_lists, limits_lists)):
+#     for i, (radii, limits) in enumerate(zip(
+#           radii_lists, max_neighbors_lists)):
 #         multi_scale_group(trees[i], trees[i + 1], radii, limits)
 
 dt = time() - t

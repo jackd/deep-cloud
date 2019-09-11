@@ -9,6 +9,8 @@ import shape_tfds.shape.modelnet.pointnet
 problem = @ModelnetProblem()
 ModelnetProblem.positions_only = %positions_only
 ModelnetProblem.num_points = %num_points
+ModelnetProblem.repeated_outputs = %repeats
 
 positions_only = True
 num_points = 1024
+repeats = None

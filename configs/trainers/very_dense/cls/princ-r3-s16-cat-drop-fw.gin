@@ -1,0 +1,4 @@
+include 'princ-r3-s16-cat-drop.gin'
+ModelnetProblem.inverse_density_weights = True
+
+model_dir = '~/deep-cloud-models/very_dense/cls/princ-r3-s16-cat-drop-fw'

@@ -1,0 +1,23 @@
+# Configuration of problem and pipelines used in the original pointnet implementation
+# Configures the following macros:
+# problem
+#
+# introduces: category, level
+
+import deep_cloud.problems.partnet
+import shape_tfds.shape.shapenet.partnet
+problem = @PartnetProblem()
+PartnetProblem.level = %level
+PartnetProblem.category = %category
+PartnetProblem.repeated_outputs = %repeats
+
+model_dir = @partnet_model_dir()
+partnet_model_dir.name = %name
+partnet_model_dir.run = %run
+partnet_model_dir.category = %category
+
+repeats = None
+category = 'table'
+level = 1
+run = 0
+name = 'default'

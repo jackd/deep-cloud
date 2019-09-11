@@ -1,0 +1,4 @@
+include 'base.gin'
+model_fn = @very_dense_semantic_segmenter
+include 'base.gin'
+model_fn = @very_dense_semantic_segmenter

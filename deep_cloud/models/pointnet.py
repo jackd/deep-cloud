@@ -9,7 +9,7 @@ import gin
 from more_keras import callbacks as cb
 from more_keras.layers import VariableMomentumBatchNormalization
 from more_keras.schedules import exponential_decay_towards
-from more_keras.framework import spec
+from more_keras import spec
 import six
 layers = tf.keras.layers
 

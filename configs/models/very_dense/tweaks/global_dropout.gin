@@ -1,0 +1,2 @@
+get_base_global_network.dropout_impl = @global/mk.layers.Dropout
+global/mk.layers.Dropout.rate = 0.6

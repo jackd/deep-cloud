@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 import numpy as np
 import tensorflow as tf
+from deep_cloud.augment import pca
 
 
 def _pack_rotation_matrix(c, s, rotation_dim=2):
@@ -90,9 +91,9 @@ def random_rigid_transform_matrix(stddev=0.02, clip=None, dim=3):
 def rotate_by_scheme(positions, normals=None, scheme='random', rotation_dim=2):
     """scheme should be in ("random", "pca-xy", "none")."""
     if scheme == 'none':
-        angle = 0
-    elif scheme == 'pca-xy':
-        from deep_cloud.augment import pca
+        return positions, normals
+
+    if scheme == 'pca-xy':
         angle = pca.get_pca_xy_angle(positions, rotation_dim=rotation_dim)
     elif scheme == 'random':
         angle = tf.random.uniform(shape=(), dtype=positions.dtype) * (2 * np.pi)

@@ -1,5 +1,2 @@
 include 'pointnet.gin'
-batch_size = 16
-train/augment_cloud.angle_stddev = 0.06
-train/augment_cloud.angle_clip = 0.18
-train/augment_cloud.uniform_scale_range = (0.8, 1.25)
+include 'tweaks/pointnet2_mixin.gin'

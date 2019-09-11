@@ -1,2 +1,2 @@
 include 'pointnet.gin'
-pointnet_builder.pointnet_version = 2
+include 'tweaks/pointnet2_mixin.gin'

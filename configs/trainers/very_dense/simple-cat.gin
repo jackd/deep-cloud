@@ -1,4 +1,0 @@
-include 'simple.gin'
-include '../../models/very_dense/tweaks/cat.gin'
-
-model_dir = '~/deep-cloud-models/very_dense/simple-cat'

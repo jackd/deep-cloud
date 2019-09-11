@@ -1,0 +1,5 @@
+import deep_cloud.problems.shapenet_part
+problem = @ShapenetPartProblem()
+ShapenetPartProblem.repeated_outputs = %repeats
+
+repeats = None

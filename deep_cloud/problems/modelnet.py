@@ -5,10 +5,12 @@ from __future__ import print_function
 import functools
 import gin
 import six
+import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 from more_keras.framework.problems.tfds import TfdsProblem
 from shape_tfds.shape import modelnet
+from deep_cloud.problems.utils import repeat_configurable
 
 FULL = 'FULL'
 
@@ -20,7 +22,8 @@ def _base_modelnet_map(inputs,
                        random_points=False,
                        normalize=False,
                        up_dim=2,
-                       repeats=None):
+                       repeats=None,
+                       class_weights=None):
     if isinstance(inputs, dict):
         positions = inputs['positions']
         normals = None if positions_only else inputs['normals']
@@ -60,21 +63,17 @@ def _base_modelnet_map(inputs,
         inputs = positions
     else:
         inputs = dict(positions=positions, normals=normals)
+    if class_weights is not None:
+        weights = tf.convert_to_tensor(class_weights, dtype=tf.float32)[labels]
     if repeats is not None:
         labels = (labels,) * (repeats + 1)
-    return inputs, labels
+        if class_weights is not None:
 
-
-def _repeat_configurable(configurable, num_repeats, name='{orig}-{index}'):
-    """Get `num_repeats + 1` versions of configurable."""
-    config = configurable.get_config()
-    cls = type(configurable)
-    orig = config.pop('name')
-    out = []
-    for i in range(num_repeats + 1):
-        config['name'] = name.format(orig=orig, index=i)
-        out.append(cls.from_config(config))
-    return out
+            weights = (weights,) * (repeats + 1)
+    if class_weights is not None:
+        return inputs, labels, weights
+    else:
+        return inputs, labels
 
 
 @gin.configurable
@@ -93,7 +92,7 @@ class ModelnetProblem(TfdsProblem):
             num_parallel_calls=tf.data.experimental.AUTOTUNE,
             normalize=False,
             repeated_outputs=None,
-    ):
+            inverse_density_weights=False):
         if builder is None:
             builder = modelnet.Pointnet()
         elif isinstance(builder, six.string_types):
@@ -108,9 +107,9 @@ class ModelnetProblem(TfdsProblem):
                     from_logits=True),
             ]
         if repeated_outputs is not None:
-            loss = _repeat_configurable(loss, repeated_outputs)
+            loss = repeat_configurable(loss, repeated_outputs)
             metrics = tuple(
-                zip(*(_repeat_configurable(m, repeated_outputs)
+                zip(*(repeat_configurable(m, repeated_outputs)
                       for m in metrics)))
 
         self._train_split = train_split
@@ -130,6 +129,7 @@ class ModelnetProblem(TfdsProblem):
             normalize=normalize,
             repeats=repeated_outputs,
         )
+        self.inverse_density_weights = inverse_density_weights,
         self.num_parallel_calls = num_parallel_calls
         input_spec = tf.TensorSpec(shape=(num_points, 3), dtype=tf.float32)
         if not positions_only:
@@ -151,11 +151,26 @@ class ModelnetProblem(TfdsProblem):
             split_map=split_map,
         )
 
+    @property
+    def class_weights(self):
+        if not self.inverse_density_weights:
+            return None
+
+        if not hasattr(self, '_class_weights'):
+            info = self.builder.info
+            num_classes = info.features[info.supervised_keys[1]].num_classes
+            freq = modelnet.load_class_freq(num_classes)
+            class_weights = np.mean(freq) / freq
+            class_weights = class_weights.astype(np.float32)
+            self._class_weights = class_weights
+        return self._class_weights
+
     def _get_base_dataset(self, split):
         dataset = super(ModelnetProblem, self)._get_base_dataset(split)
         return dataset.map(
-            functools.partial(_base_modelnet_map, **self._base_map_kwargs),
-            self.num_parallel_calls)
+            functools.partial(_base_modelnet_map,
+                              class_weights=self.class_weights,
+                              **self._base_map_kwargs), self.num_parallel_calls)
 
     def get_config(self):
         config = super(ModelnetProblem, self).get_config()
@@ -164,6 +179,7 @@ class ModelnetProblem(TfdsProblem):
         config.update(self._base_map_kwargs)
         config['train_split'] = self._train_split
         config['num_parallel_calls'] = self.num_parallel_calls
+        config['inverse_density_weights'] = self.inverse_density_weights
         return config
 
 

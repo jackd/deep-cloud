@@ -20,6 +20,7 @@ from deep_cloud.augment.rigid import random_rotation
 def augment_cloud(
         inputs,
         labels,
+        weights=None,
         jitter_stddev=None,
         # jitter_normals=None,
         jitter_clip=None,
@@ -82,4 +83,7 @@ def augment_cloud(
     else:
         inputs = dict(positions=positions, normals=normals)
 
-    return inputs, labels
+    if weights is None:
+        return inputs, labels
+    else:
+        return inputs, labels, weights

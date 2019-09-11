@@ -77,3 +77,23 @@ def rejection_sample(values, row_splits):
             out.append(i)
             consumed[values[row_splits[i]:row_splits[i + 1]]] = True
     return np.array(out, dtype=np.int32)
+
+
+def rejection_sample_lazy(tree, radius):
+    from scipy.spatial import cKDTree  # pylint: disable=no-name-in-module
+    if isinstance(tree, np.ndarray):
+        points = tree
+        tree = cKDTree(tree)
+    else:
+        points = tree.data
+        if len(points.shape) != 2:
+            points = np.reshape(points, (tree.n, -1))
+    N = points.shape[0]
+    out = []
+    consumed = np.zeros((N,), dtype=np.bool)
+    for i in range(N):
+        if not consumed[i]:
+            out.append(i)
+            neighbors = tree.query_ball_point(points[i], radius)
+            consumed[neighbors] = True
+    return out
