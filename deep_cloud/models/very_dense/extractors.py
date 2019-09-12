@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 import functools
 import gin
+import numpy as np
 import tensorflow as tf
 from more_keras.layers import Dense
 from more_keras.layers import utils as layer_utils
@@ -14,6 +15,8 @@ from deep_cloud.ops.asserts import INT_TYPES
 from deep_cloud.ops.asserts import FLOAT_TYPES
 from deep_cloud.layers import edge
 from deep_cloud.models.very_dense import utils
+
+SQRT_2 = np.sqrt(2)
 
 
 def block_variance_scaling_initializers(fan_ins,
@@ -152,10 +155,10 @@ class BiPartiteFeatureExtractor(object):
         flat_node_indices: [n_e] int tensor of indices defining
             connections between the disjoint sets. Combined with
             `row_splits` to form a ragged tensor, `edge_indices[i] == p, q, r`
-            indicates that node `i` from set `b` is connected to nodes
-            `p`, `q` and `r` from set `a`.
+            indicates that node `i` from set `a` is connected to nodes
+            `p`, `q` and `r` from set `b`.
         row_splits: ragged row splits for `flat_node_indices`.
-        size: size of set `a`.
+        size: size of set `b`.
         initial_units: number of features node features and edge features are
             mapped to before adding them up and passing into the
             `edge_network_fn`.
@@ -364,11 +367,11 @@ class KPartiteFeatureExtractor(object):
             for j in range(i):
                 if extractors[i][j] is None:
                     continue
-                af, bf, ef = extractors[i][j](node_features[i],
-                                              node_features[j],
+                af, bf, ef = extractors[i][j](node_features[j],
+                                              node_features[i],
                                               edge_features[i][j])
-                all_out_node_features[i][j] = af
-                all_out_node_features[j][i] = bf
+                all_out_node_features[i][j] = bf
+                all_out_node_features[j][i] = af
                 all_out_edge_features[i][j] = ef
             # symmetric cloud
             af, bf, ef = extractors[i][i](node_features[i],
@@ -402,7 +405,7 @@ def get_base_extractor(sizes,
                        batch_row_splits_or_k,
                        edge_reduction_fn=edge.reduce_max,
                        units_scale=4,
-                       unit_expansion_factor=2):
+                       unit_expansion_factor=SQRT_2):
     """
     Args:
         sizes: [K] list of int scalars used in edge_reduction_fn, size of all
@@ -427,23 +430,21 @@ def get_base_extractor(sizes,
             # double units in one sample dimension
             # the other sample dimension increases the receptive field
             # number of ops is constant for a sample rate of 0.25
+            units = int(np.round(units_scale * unit_expansion_factor**j))
             extractors.append(
-                BiPartiteFeatureExtractor(
-                    flat_node_indices[i][j],
-                    row_splits[i][j],
-                    sizes[j],
-                    initial_units=units_scale * unit_expansion_factor**j,
-                    edge_network_fn=mlp(
-                        [2 * units_scale * unit_expansion_factor**j]),
-                    edge_reduction_fn=edge_reduction_fn,
-                    dense_factory=Dense))
+                BiPartiteFeatureExtractor(flat_node_indices[i][j],
+                                          row_splits[i][j],
+                                          sizes[i],
+                                          initial_units=units,
+                                          edge_network_fn=mlp([units]),
+                                          edge_reduction_fn=edge_reduction_fn,
+                                          dense_factory=Dense))
         # global extractors work per-node
         # for sample rate of 0.25, doubling units per layer keeps ops constant
+        units = int(np.round(2 * units_scale * unit_expansion_factor**i))
         global_extractors.append(
-            GlobalBipartiteFeatureExtractor(
-                batch_row_splits_or_k[i],
-                2 * units_scale * unit_expansion_factor**i,
-                mlp([4 * units_scale * 2**i])))
+            GlobalBipartiteFeatureExtractor(batch_row_splits_or_k[i], units,
+                                            mlp([units])))
 
     return KPartiteFeatureExtractor(
         local_extractors,

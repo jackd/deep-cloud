@@ -1,8 +1,9 @@
 include 'base.gin'
+include '../../../models/very_dense/tweaks/principled.gin'
 include '../../../pipelines/tweaks/pointnet2_mixin.gin'
 include '../../../problems/tweaks/pointnet2_mixin.gin'
 include '../../../models/tweaks/wd4e-5.gin'
 
-repeats = 3
-exponential_radii.depth = 3
-model_dir = '~/deep-cloud-models/very_dense/cls/base-r3-b8-wd-pn2'
+unit_scale = 8
+repeats = 2
+name = 'princ'

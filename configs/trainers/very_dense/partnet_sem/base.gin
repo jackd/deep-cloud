@@ -3,7 +3,9 @@ include '../../../pipelines/pointnet2.gin'
 include '../../../models/very_dense/seg.gin'
 include '../../../optimizers/adam-decay.gin'
 
-batch_size = 16
-epochs = 250
+batch_size = 8
+epochs = 100
+unit_scale = 4
+repeats = 1
 
 name = 'base'

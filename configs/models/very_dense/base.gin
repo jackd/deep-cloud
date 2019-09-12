@@ -1,6 +1,8 @@
 import deep_cloud.models.very_dense.core
 import deep_cloud.models.very_dense.poolers
 
+include '../tweaks/wd4e-5.gin'
+
 very_dense_features.repeats = %repeats
 very_dense_features.residual_global_features = %residual_global_features
 very_dense_features.residual_node_features = %residual_node_features
@@ -8,9 +10,9 @@ very_dense_features.residual_edge_features = %residual_edge_features
 
 positions_only = False
 
-residual_global_features = False
-residual_node_features = False
-residual_edge_features = False
+residual_global_features = True
+residual_node_features = True
+residual_edge_features = True
 
 repeats = 1
 

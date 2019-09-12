@@ -1,4 +1,0 @@
-include 'base.gin'
-
-num_points = 512
-model_dir = '~/deep-cloud-models/very_dense/cls/base-512'

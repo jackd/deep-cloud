@@ -2,6 +2,5 @@ include 'base.gin'
 include '../../../models/very_dense/tweaks/principled.gin'
 include '../../../pipelines/tweaks/pointnet2_mixin.gin'
 include '../../../problems/tweaks/pointnet2_mixin.gin'
-include '../../../models/tweaks/wd4e-5.gin'
 
 model_dir = '~/deep-cloud-models/very_dense/cls/princ'

@@ -1,1 +1,2 @@
+import deep_cloud.problems.builders  # needed for pointnet2
 pointnet_builder.pointnet_version = 2

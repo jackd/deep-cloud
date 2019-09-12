@@ -21,8 +21,8 @@ from deep_cloud.ops.np_utils.tree_utils import core
 from deep_cloud.ops.np_utils import cloud as np_cloud
 
 from deep_cloud.ops.np_utils.tree_utils import pykd
-from deep_cloud.ops.np_utils.tree_utils import spatial
-from deep_cloud.ops.np_utils.tree_utils import skkd
+# from deep_cloud.ops.np_utils.tree_utils import spatial
+# from deep_cloud.ops.np_utils.tree_utils import skkd
 # from pykdtree.kdtree import KDTree  # pylint: disable=no-name-in-module
 
 from more_keras.framework import pipelines
@@ -54,6 +54,18 @@ def rejection_sample_lazy(tree, points, radius, k0):
     return out
 
 
+def rejection_sample_active(tree, points, radius, k0):
+    N = points.shape[0]
+    out = []
+    consumed = np.zeros((N,), dtype=np.bool)
+    indices = tree.query_ball_point(points, radius, approx_neighbors=k0)
+    for i in range(N):
+        if not consumed[i]:
+            consumed[indices[i]] = True
+            out.append(i)
+    return out
+
+
 @gin.configurable
 def compute_edges_principled_eager_fn(depth=4, k0=16, tree_impl=DEFAULT_TREE):
     return functools.partial(
@@ -82,28 +94,43 @@ def compute_edges_principled_eager(coords,
 
     # coords is now a packing of barely-intersecting spheres of radius 1.
     all_coords = [coords]
-    all_normals = [normals]
+    if normals is not None:
+        all_normals = [normals]
     tree = tree_impl(coords)
     trees = [tree]
 
-    base_coords = coords
-    base_tree = tree
-    base_normals = normals
+    # base_coords = coords
+    # base_tree = tree
+    # base_normals = normals
 
     # perform sampling, build trees
     radii = 4 * np.power(2, np.arange(depth))
     ## Rejection sample on original cloud
+    # for i, radius in enumerate(radii[:-1]):
+    #     indices = rejection_sample_lazy(base_tree,
+    #                                       base_coords,
+    #                                       radius,
+    #                                       k0=k0 * 4**i)
+    #     coords = base_coords[indices]
+    #     tree = tree_impl(coords)
+
+    #     all_coords.append(coords)
+    #     trees.append(tree)
+    #     if normals is not None:
+    #         all_normals.append(base_normals[indices])
+
+    # Recursively rejection sample
+    # Significantly faster, but not -all- top-level nodes will be in all
+    # neighborhoords.
     for i, radius in enumerate(radii[:-1]):
-        indices = rejection_sample_lazy(base_tree,
-                                        base_coords,
-                                        radius,
-                                        k0=k0 * 4**i)
-        coords = base_coords[indices]
+        indices = rejection_sample_active(tree, coords, radius, k0=k0)
+        coords = coords[indices]
         tree = tree_impl(coords)
 
         all_coords.append(coords)
-        all_normals.append(base_normals[indices])
         trees.append(tree)
+        if normals is not None:
+            all_normals.append(normals[indices])
 
     # compute edges
     flat_node_indices = utils.lower_triangular(depth)
@@ -112,10 +139,9 @@ def compute_edges_principled_eager(coords,
 
     for i in range(depth):
         for j in range(i + 1):
-            indices = trees[j].query_ball_point(all_coords[i],
+            indices = trees[i].query_ball_point(all_coords[j],
                                                 radii[i],
-                                                approx_neighbors=k0 *
-                                                4**(i - j))
+                                                approx_neighbors=k0)
             flat_node_indices[i][j] = fni = indices.flat_values.astype(np.int64)
             row_splits[i][j] = indices.row_splits.astype(np.int64)
 
@@ -123,13 +149,16 @@ def compute_edges_principled_eager(coords,
             # this could be done outside the py_function, but it uses np.repeat
             # which is faster than tf.repeat on cpu.
             flat_rel_coords[i][j] = np_cloud.get_relative_coords(
-                all_coords[j],
                 all_coords[i],
+                all_coords[j],
                 fni,
                 row_lengths=indices.row_lengths)
 
-    return (all_coords, all_normals, flat_rel_coords, flat_node_indices,
-            row_splits)
+    if normals is None:
+        return (all_coords, flat_rel_coords, flat_node_indices, row_splits)
+    else:
+        return (all_coords, all_normals, flat_rel_coords, flat_node_indices,
+                row_splits)
 
 
 @gin.configurable
@@ -157,7 +186,8 @@ def compute_edges_eager(coords,
                         radii,
                         pooler,
                         reorder=False,
-                        tree_impl=DEFAULT_TREE):
+                        tree_impl=DEFAULT_TREE,
+                        k0=16):
     """
     Recursively sample the input cloud and find edges based on ball searches.
 
@@ -207,7 +237,7 @@ def compute_edges_eager(coords,
     for i, radius in enumerate(radii[:-1]):
         tree = trees[i] = tree_impl(coords)
         indices = node_indices[i][i] = tree.query_pairs(radius,
-                                                        approx_neighbors=16 *
+                                                        approx_neighbors=k0 *
                                                         2**i)
         # print(radius, tree.n)
         # print(np.mean(indices.row_lengths))
@@ -219,7 +249,7 @@ def compute_edges_eager(coords,
     # final cloud
     tree = trees[-1] = tree_impl(coords)
     node_indices[-1][-1] = tree.query_pairs(radii[-1],
-                                            approx_neighbors=16 *
+                                            approx_neighbors=k0 *
                                             2**(depth - 1))
 
     # do below the diagonal, i.e. [i, j], i > j + 1
@@ -227,20 +257,19 @@ def compute_edges_eager(coords,
         in_tree = trees[i]
         radius = radii[i]
         for j in range(i):
-            node_indices[i][j] = in_tree.query_ball_tree(trees[j],
-                                                         radius,
-                                                         approx_neighbors=16 *
-                                                         2**(2 * i - j))
+            node_indices[i][j] = trees[j].query_ball_tree(in_tree,
+                                                          radius,
+                                                          approx_neighbors=k0)
 
     # TODO: Should be able to do the following in `depth` `rel_coords` calls
-    # Currently uses `depth * (depth + 1) // 2`.
+    # Currently uses `depth * (depth + 1) // 2`. Maybe not efficient?
     flat_rel_coords = utils.lower_triangular(depth)
     for i in range(depth):
         for j in range(i + 1):
             indices = node_indices[i][j]
             flat_rel_coords[i][j] = np_cloud.get_relative_coords(
-                all_coords[j],
                 all_coords[i],
+                all_coords[j],
                 indices.flat_values,
                 row_lengths=indices.row_lengths)
 
@@ -298,7 +327,6 @@ def compute_edges(coords, normals, depth=4, eager_fn=None):
     if tf.executing_eagerly():
         return eager_fn(coords, normals)
 
-    py_func = functools.partial(eager_fn, depth=depth)
     if normals is None:
         Tout = (
             [tf.float32] * depth,  # coords
@@ -308,7 +336,10 @@ def compute_edges(coords, normals, depth=4, eager_fn=None):
         )
         Tout_flat = tf.nest.flatten(Tout)
         # out_flat = tf.py_function(fn, [coords, normals], Tout_flat)
-        out_flat = tf.py_function(py_func, [coords], Tout_flat)
+
+        out_flat = tf.py_function(
+            functools.partial(_flatten_output, eager_fn, normals=None),
+            [coords], Tout_flat)
 
         (all_coords, flat_rel_coords, flat_node_indices,
          row_splits) = tf.nest.pack_sequence_as(Tout, out_flat)
@@ -323,7 +354,8 @@ def compute_edges(coords, normals, depth=4, eager_fn=None):
         )
         Tout_flat = tf.nest.flatten(Tout)
         # out_flat = tf.py_function(fn, [coords, normals], Tout_flat)
-        out_flat = tf.py_function(py_func, [coords, normals], Tout_flat)
+        out_flat = tf.py_function(functools.partial(_flatten_output, eager_fn),
+                                  [coords, normals], Tout_flat)
 
         (all_coords, all_normals, flat_rel_coords, flat_node_indices,
          row_splits) = tf.nest.pack_sequence_as(Tout, out_flat)
@@ -336,7 +368,7 @@ def compute_edges(coords, normals, depth=4, eager_fn=None):
     # pooler = poolers.SlicePooler()
     # for _ in range(depth - 1):
     #     sizes.append(pooler.output_size(sizes[-1]))
-    sizes = [None] * 4
+    sizes = [None] * depth
 
     for i in range(depth):
         size = sizes[i]
@@ -440,7 +472,7 @@ def post_batch_map(features, labels, weights=None):
     for i in range(K):
         for j in range(i + 1):
             flat_node_indices[i][j] = layer_utils.apply_row_offset(
-                node_indices[i][j], offsets[j]).flat_values
+                node_indices[i][j], offsets[i]).flat_values
     flat_node_indices = utils.ttuple(flat_node_indices)
 
     all_coords = tuple(all_coords)
@@ -599,7 +631,7 @@ def very_dense_features(
             global_features = add_residual(inp_global_features, global_features,
                                            dense_factory)
 
-        if residual_node_features:
+        if residual_node_features and inp_node_features is not None:
             node_features = tf.nest.map_structure(
                 lambda inp, out: add_residual(inp, out, dense_factory),
                 inp_node_features, node_features)
@@ -623,10 +655,10 @@ def very_dense_features(
 def very_dense_classifier(input_spec,
                           output_spec,
                           dense_factory=Dense,
-                          features_factory=very_dense_features):
+                          features_fn=very_dense_features):
     num_classes = output_spec.shape[-1]
     inputs = spec.inputs(input_spec)
-    node_features, edge_features, global_features = features_factory(inputs)
+    node_features, edge_features, global_features = features_fn(inputs)
     del node_features, edge_features
     preds = []
     for gf in global_features:
@@ -644,11 +676,11 @@ def _from_row_splits(args):
 def very_dense_semantic_segmenter(input_spec,
                                   output_spec,
                                   dense_factory=Dense,
-                                  features_factory=very_dense_features):
+                                  features_fn=very_dense_features):
     num_classes = output_spec.shape[-1]
     inputs = spec.inputs(input_spec)
     class_masks = inputs.pop('class_masks', None)
-    node_features, edge_features, global_features = features_factory(inputs)
+    node_features, edge_features, global_features = features_fn(inputs)
     del edge_features, global_features
     node_features = [nf[0] for nf in node_features]  # high res features
     preds = [dense_factory(num_classes)(n) for n in node_features]
@@ -661,7 +693,8 @@ def very_dense_semantic_segmenter(input_spec,
         preds = [tf.where(class_masks, pred, if_false) for pred in preds]
     # from_row_splits = tf.keras.layers.Lambda(_from_row_splits)
     # preds = [from_row_splits([pred, outer_row_splits]) for pred in preds]
-    return tf.keras.Model(inputs=tf.nest.flatten(inputs), outputs=preds)
+    inputs = tf.nest.flatten(inputs)
+    return tf.keras.Model(inputs=inputs, outputs=preds)
 
 
 if __name__ == '__main__':

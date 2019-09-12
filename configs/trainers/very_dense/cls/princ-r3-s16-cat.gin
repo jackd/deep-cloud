@@ -1,6 +1,0 @@
-include 'princ.gin'
-include '../../../models/very_dense/tweaks/cat.gin'
-repeats = 3
-units_scale = 16
-
-model_dir = '~/deep-cloud-models/very_dense/cls/princ-r3-s16-cat'

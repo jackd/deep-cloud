@@ -2,3 +2,5 @@ compute_edges_principled_eager_fn.depth = %depth
 eager_fn = @compute_edges_principled_eager_fn()
 pre_batch_map.shuffle = True
 repeats = 3
+
+units_scale = 32

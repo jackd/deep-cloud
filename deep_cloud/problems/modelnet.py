@@ -65,6 +65,7 @@ def _base_modelnet_map(inputs,
         inputs = dict(positions=positions, normals=normals)
     if class_weights is not None:
         weights = tf.convert_to_tensor(class_weights, dtype=tf.float32)[labels]
+        weights = tf.expand_dims(weights, axis=-1)
     if repeats is not None:
         labels = (labels,) * (repeats + 1)
         if class_weights is not None:
@@ -129,7 +130,7 @@ class ModelnetProblem(TfdsProblem):
             normalize=normalize,
             repeats=repeated_outputs,
         )
-        self.inverse_density_weights = inverse_density_weights,
+        self.inverse_density_weights = inverse_density_weights
         self.num_parallel_calls = num_parallel_calls
         input_spec = tf.TensorSpec(shape=(num_points, 3), dtype=tf.float32)
         if not positions_only:

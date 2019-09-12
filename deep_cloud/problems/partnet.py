@@ -8,6 +8,7 @@ import tensorflow as tf
 from shape_tfds.shape.shapenet import partnet
 from more_keras.framework.problems.tfds import TfdsProblem
 from deep_cloud.problems.utils import repeat_configurable
+from more_keras.metrics import ProbMeanIoU
 
 
 @gin.configurable
@@ -39,7 +40,7 @@ class PartnetProblem(TfdsProblem):
             from_logits=True, reduction='sum_over_batch_size')
         metrics = [
             # tf.keras.metrics.SparseCategoricalAccuracy(),
-            tf.keras.metrics.MeanIoU(num_classes=num_classes),
+            ProbMeanIoU(num_classes=num_classes),
         ]
         self.inverse_density_weights = inverse_density_weights
 
@@ -51,6 +52,7 @@ class PartnetProblem(TfdsProblem):
         else:
             if objective is None:
                 objective = metrics[-1].name
+        self.repeated_outputs = repeated_outputs
         super(PartnetProblem,
               self).__init__(builder=builder,
                              loss=loss,
@@ -64,12 +66,28 @@ class PartnetProblem(TfdsProblem):
     def class_weights(self):
         raise NotImplementedError
 
+    def _get_base_dataset(self, split):
+        dataset = super(PartnetProblem, self)._get_base_dataset(split)
+
+        if self.builder.up_dim != 2:
+
+            def map_fn(features, labels):
+                features = tf.roll(features, 2 - self.builder.up_dim, axis=-1)
+                return features, labels
+
+            dataset = dataset.map(
+                map_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        return dataset
+
     def post_batch_map(self, labels, weights=None):
+        labels = tf.reshape(labels, (-1,))
         if weights is not None:
             if weights.shape.ndims == 1:
                 weights = tf.tile(tf.expand_dims(weights, axis=1),
                                   (1, tf.shape(labels)[1]))
             weights = tf.reshape(weights, (-1,))
-
-        labels = tf.reshape(labels, (-1,))
+        if self.repeated_outputs is not None:
+            if weights is not None:
+                weights = (weights,) * (1 + self.repeated_outputs)
+            labels = (labels,) * (1 + self.repeated_outputs)
         return labels, weights

@@ -1,4 +1,0 @@
-include 'base.gin'
-
-repeats = 3
-model_dir = '~/deep-cloud-models/very_dense/cls/base-r3'

@@ -6,6 +6,72 @@ import tensorflow as tf
 from deep_cloud.augment import pca
 
 
+def from_axis_angle(axis, angle, name=None):
+    """Convert an axis-angle representation to a rotation matrix.
+
+    Straight from tensorflow_graphics. Copied here because importing
+    graphics takes FOREVER, and this is the only use.
+
+    Note:
+      In the following, A1 to An are optional batch dimensions, which must be
+      broadcast compatible.
+
+    Args:
+      axis: A tensor of shape `[A1, ..., An, 3]`, where the last dimension
+        represents a normalized axis.
+      angle: A tensor of shape `[A1, ..., An, 1]`, where the last dimension
+        represents a normalized axis.
+      name: A name for this op that defaults to
+        "rotation_matrix_3d_from_axis_angle".
+
+    Returns:
+      A tensor of shape `[A1, ..., An, 3, 3]`, where the last two dimensions
+      represents a 3d rotation matrix.
+
+    Raises:
+      ValueError: If the shape of `axis` or `angle` is not supported.
+  """
+    with tf.compat.v1.name_scope(name, "rotation_matrix_3d_from_axis_angle",
+                                 [axis, angle]):
+        axis = tf.convert_to_tensor(value=axis)
+        angle = tf.convert_to_tensor(value=angle)
+
+        # shape.check_static(tensor=axis,
+        #                    tensor_name="axis",
+        #                    has_dim_equals=(-1, 3))
+        # shape.check_static(tensor=angle,
+        #                    tensor_name="angle",
+        #                    has_dim_equals=(-1, 1))
+        # shape.compare_batch_dimensions(tensors=(axis, angle),
+        #                                tensor_names=("axis", "angle"),
+        #                                last_axes=-2,
+        #                                broadcast_compatible=True)
+        # axis = asserts.assert_normalized(axis)
+
+        sin_axis = tf.sin(angle) * axis
+        cos_angle = tf.cos(angle)
+        cos1_axis = (1.0 - cos_angle) * axis
+        _, axis_y, axis_z = tf.unstack(axis, axis=-1)
+        cos1_axis_x, cos1_axis_y, _ = tf.unstack(cos1_axis, axis=-1)
+        sin_axis_x, sin_axis_y, sin_axis_z = tf.unstack(sin_axis, axis=-1)
+        tmp = cos1_axis_x * axis_y
+        m01 = tmp - sin_axis_z
+        m10 = tmp + sin_axis_z
+        tmp = cos1_axis_x * axis_z
+        m02 = tmp + sin_axis_y
+        m20 = tmp - sin_axis_y
+        tmp = cos1_axis_y * axis_z
+        m12 = tmp - sin_axis_x
+        m21 = tmp + sin_axis_x
+        diag = cos1_axis * axis + cos_angle
+        diag_x, diag_y, diag_z = tf.unstack(diag, axis=-1)
+        matrix = tf.stack(
+            (diag_x, m01, m02, m10, diag_y, m12, m20, m21, diag_z),
+            axis=-1)  # pyformat: disable
+        output_shape = tf.concat((tf.shape(input=axis)[:-1], (3, 3)), axis=-1)
+        return tf.reshape(matrix, shape=output_shape)
+
+
 def _pack_rotation_matrix(c, s, rotation_dim=2):
     # https://en.wikipedia.org/wiki/Rotation_matrix
     if rotation_dim == 0:
@@ -137,8 +203,8 @@ def random_scale(positions, stddev=None, uniform_range=None):
 def random_rotation_matrix(batch_shape=(), angle_stddev=0.06, angle_clip=0.18):
     # slightly different to the one used in pointnet2
     # we use from_axis_angle rather than from_euler_angles
-    from tensorflow_graphics.geometry.transformation.rotation_matrix_3d \
-      import from_axis_angle
+    # from tensorflow_graphics.geometry.transformation.rotation_matrix_3d \
+    #   import from_axis_angle
     batch_shape = tuple(batch_shape)
     axis = tf.random.normal(shape=batch_shape + (3,))
     axis = axis / tf.linalg.norm(axis, axis=-1, keepdims=True)

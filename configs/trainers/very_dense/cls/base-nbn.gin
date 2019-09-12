@@ -1,3 +1,0 @@
-include 'base.gin'
-mlp.batch_norm_impl = None
-model_dir = '~/deep-cloud-models/very_dense/cls/base-nbn'

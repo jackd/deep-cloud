@@ -1,5 +1,5 @@
 include 'princ.gin'
 include '../../../models/very_dense/tweaks/global_dropout.gin'
-units_scale = 16
+units_scale = 64
 
 model_dir = '~/deep-cloud-models/very_dense/cls/princ-s64-res-drop'

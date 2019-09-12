@@ -1,4 +1,0 @@
-include 'base.gin'
-include '../../../models/very_dense/tweaks/res.gin'
-
-model_dir = '~/deep-cloud-models/very_dense/cls/base-res'
