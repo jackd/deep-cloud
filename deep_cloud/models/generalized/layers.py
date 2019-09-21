@@ -149,13 +149,27 @@ class MultiPointnet(tf.keras.layers.Layer):
         return multi_pointnet(self.node_layer, self.coord_layer, *inputs)
 
 
-def _ragged_conv_combine(activation, node_features, coord_features, indices):
+def _ragged_conv_combine(activation,
+                         node_features,
+                         coord_features,
+                         indices,
+                         weights=None):
     features = node_features * tf.expand_dims(coord_features, (-2,))
     features = tf.reduce_sum(features, axis=-1)
     if activation is not None:
         features = activation(features)
-    features = tf.math.unsorted_segment_sum(
-        features, indices, num_segments=tf.reduce_max(indices) + 1)
+    num_segments = tf.reduce_max(indices) + 1
+    if weights is None:
+        features = tf.math.unsorted_segment_sum(features,
+                                                indices,
+                                                num_segments=num_segments)
+    else:
+        weights = tf.expand_dims(weights, axis=-1)
+        features = tf.math.unsorted_segment_sum(features * weights,
+                                                indices,
+                                                num_segments=num_segments)
+        weights = tf.math.unsorted_segment_sum(weights, indices, num_segments)
+        features = features / weights
     return features
 
 
@@ -165,6 +179,7 @@ def ragged_convolution(activation,
                        coord_features,
                        indices,
                        row_splits,
+                       weights=None,
                        gather_first=False):
     coord_dims = coord_features.shape[-1]
     assert (coord_dims is not None)
@@ -179,12 +194,13 @@ def ragged_convolution(activation,
 
     node_features = tf.reshape(node_features, (-1, units, coord_dims))
     return _ragged_conv_combine(activation, node_features, coord_features,
-                                indices)
+                                indices, weights)
 
 
 def featureless_ragged_convolution(activation, embedding, coord_features,
-                                   indices):
-    return _ragged_conv_combine(activation, embedding, coord_features, indices)
+                                   indices, weights):
+    return _ragged_conv_combine(activation, embedding, coord_features, indices,
+                                weights)
 
 
 def ragged_convolution_transpose(activation,
@@ -193,6 +209,7 @@ def ragged_convolution_transpose(activation,
                                  coord_features,
                                  indices,
                                  row_splits,
+                                 weights=None,
                                  gather_first=False):
     coord_dims = coord_features.shape[-1]
     assert (coord_dims is not None)
@@ -209,8 +226,18 @@ def ragged_convolution_transpose(activation,
     features = tf.reduce_sum(features, axis=-1)
     if activation is not None:
         features = activation(features)
-    features = tf.RaggedTensor.from_row_splits(features, row_splits)
-    return tf.reduce_sum(features, axis=1)
+    if weights is None:
+        features = tf.RaggedTensor.from_row_splits(features, row_splits)
+        features = tf.reduce_sum(features, axis=1)
+    else:
+        weights = tf.expand_dims(weights, axis=-1)
+        features = features * weights
+        features = tf.RaggedTensor.from_row_splits(features, row_splits)
+        features = tf.reduce_sum(features, axis=1)
+        weights = tf.RaggedTensor.from_row_splits(weights, row_splits)
+        weights = tf.reduce_sum(weights, axis=1)
+        features = features / weights
+    return features
 
 
 # def ragged_convolution_transpose(layer, activation, node_features,

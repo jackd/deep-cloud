@@ -10,6 +10,7 @@ def in_place_bottleneck(node_features,
                         coord_features,
                         indices,
                         row_splits,
+                        weights,
                         batch_norm_fn,
                         activation_fn,
                         filters=None,
@@ -25,8 +26,10 @@ def in_place_bottleneck(node_features,
     node_features = activation_fn(batch_norm_fn(node_features))
     # conv
     node_features = gen_layers.RaggedConvolution(
-        filters // bottleneck_factor, dense_factory=dense_factory)(
-            [activation_fn(node_features), coord_features, indices, row_splits])
+        filters // bottleneck_factor, dense_factory=dense_factory)([
+            activation_fn(node_features), coord_features, indices, row_splits,
+            weights
+        ])
     node_features = activation_fn(batch_norm_fn(node_features))
     # unactivated dense
     node_features = dense_factory(filters)(node_features)
@@ -52,6 +55,7 @@ def down_sample_bottleneck(node_features,
                            coord_features,
                            indices,
                            row_splits,
+                           weights,
                            sample_indices,
                            filters,
                            batch_norm_fn,
@@ -64,8 +68,10 @@ def down_sample_bottleneck(node_features,
     short = node_features
     # conv
     node_features = gen_layers.RaggedConvolution(
-        filters // bottleneck_factor, dense_factory=dense_factory)(
-            [activation_fn(node_features), coord_features, indices, row_splits])
+        filters // bottleneck_factor, dense_factory=dense_factory)([
+            activation_fn(node_features), coord_features, indices, row_splits,
+            weights
+        ])
     node_features = activation_fn(batch_norm_fn(node_features))
     # unactivated dense
     node_features = dense_factory(filters)(node_features)

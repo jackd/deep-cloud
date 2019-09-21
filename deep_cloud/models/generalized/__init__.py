@@ -69,11 +69,14 @@ def compute_edges_eager(coords, depth=5, k0=16, tree_impl=DEFAULT_TREE):
     row_splits = []
     rel_coords = []
     sample_indices = []
+    weights = []
 
     def add_in_place(tree, coords, radius):
         indices = tree.query_ball_point(coords, radius, approx_neighbors=k0)
         rc = np.repeat(coords, indices.row_lengths,
                        axis=0) - coords[indices.flat_values]
+        dist = np.linalg.norm(rc, axis=-1)
+        weights.append(radius - dist)
         flat_indices.append(indices.flat_values)
         row_splits.append(indices.row_splits)
         rel_coords.append(rc)
@@ -92,6 +95,7 @@ def compute_edges_eager(coords, depth=5, k0=16, tree_impl=DEFAULT_TREE):
 
         rc = np.repeat(coords, indices.row_lengths,
                        axis=0) - out_coords[indices.flat_values]
+        weights.append(radii[i + 1] - np.linalg.norm(rc, axis=-1))
         flat_indices.append(indices.flat_values)
         row_splits.append(indices.row_splits)
         rel_coords.append(rc)
@@ -107,6 +111,7 @@ def compute_edges_eager(coords, depth=5, k0=16, tree_impl=DEFAULT_TREE):
     return (
         tuple(flat_indices),
         tuple(rel_coords),
+        tuple(weights),
         tuple(row_splits),
         tuple(all_coords),
         tuple(sample_indices),
@@ -137,6 +142,7 @@ def pre_batch_map(features,
     specs = [
         (tf.TensorSpec((None,), tf.int64),) * n_convs,  # flat_indices
         (tf.TensorSpec((None, 3), tf.float32),) * n_convs,  # flat_rel_coords
+        (tf.TensorSpec((None,), tf.float32),) * n_convs,  # feature_weights
         (tf.TensorSpec((None,), tf.int64),) * n_convs,  # row_splits
         (tf.TensorSpec((None, 3), tf.float32),) * depth,  # all_coords
         (tf.TensorSpec((None,), tf.int64),) * (depth - 1),  # sample_indices
@@ -149,8 +155,8 @@ def pre_batch_map(features,
     for out, spec in zip(out_flat, specs_flat):
         out.set_shape(spec.shape)
     out = tf.nest.pack_sequence_as(specs, out_flat)
-    (flat_node_indices, flat_rel_coords, row_splits, all_coords,
-     sample_indices) = out
+    (flat_node_indices, flat_rel_coords, feature_weights, row_splits,
+     all_coords, sample_indices) = out
 
     all_coords, sample_indices = tf.nest.map_structure(
         ragged_batching.pre_batch_ragged, (all_coords, sample_indices))
@@ -159,10 +165,12 @@ def pre_batch_map(features,
                                          flat_node_indices, row_splits)
     rel_coords = tf.nest.map_structure(tf.RaggedTensor.from_row_splits,
                                        flat_rel_coords, row_splits)
-
+    feature_weights = tf.nest.map_structure(tf.RaggedTensor.from_row_splits,
+                                            feature_weights, row_splits)
     features = dict(
         all_coords=all_coords,
         rel_coords=rel_coords,
+        feature_weights=feature_weights,
         node_indices=node_indices,
         sample_indices=sample_indices,
     )
@@ -180,9 +188,9 @@ def post_batch_map(
         weights=None,
         #    include_outer_row_splits=False
 ):
-    all_coords, rel_coords, node_indices, sample_indices = (
-        features[k]
-        for k in ('all_coords', 'rel_coords', 'node_indices', 'sample_indices'))
+    all_coords, rel_coords, feature_weights, node_indices, sample_indices = (
+        features[k] for k in ('all_coords', 'rel_coords', 'feature_weights',
+                              'node_indices', 'sample_indices'))
 
     row_splits = tf.nest.map_structure(lambda rt: rt.nested_row_splits[1],
                                        node_indices)
@@ -191,6 +199,8 @@ def post_batch_map(
         ragged_batching.post_batch_ragged, (all_coords, sample_indices))
     offsets = [op_utils.get_row_offsets(c) for c in all_coords]
     flat_rel_coords = tf.nest.map_structure(lambda x: x.flat_values, rel_coords)
+    feature_weights = tf.nest.map_structure(lambda x: x.flat_values,
+                                            feature_weights)
 
     depth = (len(node_indices) + 1) // 2
     flat_node_indices = [
@@ -217,6 +227,7 @@ def post_batch_map(
         all_coords=all_coords,
         flat_rel_coords=flat_rel_coords,
         flat_node_indices=flat_node_indices,
+        feature_weights=feature_weights,
         row_splits=row_splits,
         sample_indices=flat_sample_indices,
     )
@@ -245,9 +256,23 @@ def _from_row_splits(args):
     return tf.RaggedTensor.from_row_splits(*args)
 
 
+def get_coord_features(rel_coords, order=2, tol=1e-4):
+    if order == 1:
+        coord_features = rel_coords
+    elif order == 2:
+        p2 = tf.square(rel_coords)
+        x, y, z = tf.unstack(rel_coords, axis=-1)
+        mixed = tf.stack([x * y, x * z, y * z], axis=-1)
+        coord_features = tf.concat([rel_coords, mixed, p2], axis=-1)
+    else:
+        raise NotImplementedError()
+    return coord_features
+
+
 @gin.configurable(blacklist=['input_spec', 'output_spec'])
 def generalized_classifier(input_spec,
                            output_spec,
+                           coord_order=2,
                            dense_factory=mk_layers.Dense,
                            batch_norm_impl=mk_layers.BatchNormalization,
                            activation='relu',
@@ -273,6 +298,7 @@ def generalized_classifier(input_spec,
         flat_node_indices,
         row_splits,
         sample_indices,
+        feature_weights,
         # outer_row_splits,
     ) = (
         inputs[k] for k in (
@@ -281,17 +307,20 @@ def generalized_classifier(input_spec,
             'flat_node_indices',
             'row_splits',
             'sample_indices',
+            'feature_weights',
             # 'outer_row_splits',
         ))
     # del outer_row_splits
 
     depth = len(all_coords)
+    coord_features = tuple(
+        get_coord_features(rc, order=coord_order) for rc in flat_rel_coords)
     features = inputs.get('normals')
 
     filters = filters0
     if features is None:
         features = gen_layers.FeaturelessRaggedConvolution(filters)(
-            [flat_rel_coords[0], flat_node_indices[0]])
+            [flat_rel_coords[0], flat_node_indices[0], feature_weights[0]])
     else:
         raise NotImplementedError()
 
@@ -303,17 +332,20 @@ def generalized_classifier(input_spec,
     res_features = []
     for i in range(depth - 1):
         # in place
-        features = blocks.in_place_bottleneck(features, flat_rel_coords[2 * i],
+        features = blocks.in_place_bottleneck(features,
+                                              coord_features[2 * i],
                                               flat_node_indices[2 * i],
                                               row_splits[2 * i],
+                                              weights=feature_weights[2 * i],
                                               **bottleneck_kwargs)
         res_features.append(features)
         # down sample
         filters *= 2
         features = blocks.down_sample_bottleneck(features,
-                                                 flat_rel_coords[2 * i + 1],
+                                                 coord_features[2 * i + 1],
                                                  flat_node_indices[2 * i + 1],
                                                  row_splits[2 * i + 1],
+                                                 feature_weights[2 * i + 1],
                                                  sample_indices[i],
                                                  filters=filters,
                                                  **bottleneck_kwargs)
@@ -322,6 +354,7 @@ def generalized_classifier(input_spec,
                                           flat_rel_coords[-1],
                                           flat_node_indices[-1],
                                           row_splits[-1],
+                                          feature_weights[-1],
                                           filters=filters,
                                           **bottleneck_kwargs)
 
@@ -363,6 +396,7 @@ def generalized_semantic_segmenter(input_spec,
     (
         all_coords,
         flat_rel_coords,
+        feature_weights,
         flat_node_indices,
         row_splits,
         sample_indices,
@@ -371,6 +405,7 @@ def generalized_semantic_segmenter(input_spec,
         inputs[k] for k in (
             'all_coords',
             'flat_rel_coords',
+            'feature_weights',
             'flat_node_indices',
             'row_splits',
             'sample_indices',
@@ -384,7 +419,7 @@ def generalized_semantic_segmenter(input_spec,
     filters = filters0
     if features is None:
         features = gen_layers.FeaturelessRaggedConvolution(filters)(
-            [flat_rel_coords[0], flat_node_indices[0]])
+            [flat_rel_coords[0], flat_node_indices[0], feature_weights[0]])
     else:
         raise NotImplementedError()
 
@@ -399,6 +434,7 @@ def generalized_semantic_segmenter(input_spec,
         features = blocks.in_place_bottleneck(features, flat_rel_coords[2 * i],
                                               flat_node_indices[2 * i],
                                               row_splits[2 * i],
+                                              feature_weights[2 * i],
                                               **bottleneck_kwargs)
         res_features.append(features)
         # down sample
@@ -407,6 +443,7 @@ def generalized_semantic_segmenter(input_spec,
                                                  flat_rel_coords[2 * i + 1],
                                                  flat_node_indices[2 * i + 1],
                                                  row_splits[2 * i + 1],
+                                                 feature_weights[2 * i + 1],
                                                  sample_indices[i],
                                                  filters=filters,
                                                  **bottleneck_kwargs)
@@ -417,6 +454,7 @@ def generalized_semantic_segmenter(input_spec,
                                               flat_rel_coords[2 * i],
                                               flat_node_indices[2 * i],
                                               row_splits[2 * i],
+                                              feature_weights[2 * i],
                                               filters=filters,
                                               **bottleneck_kwargs)
         if i != depth - 1:
@@ -426,7 +464,8 @@ def generalized_semantic_segmenter(input_spec,
         features = gen_layers.RaggedConvolutionTranspose(
             filters, dense_factory=dense_factory)([
                 features, flat_rel_coords[2 * i - 1],
-                flat_node_indices[2 * i - 1], row_splits[2 * i - 1]
+                flat_node_indices[2 * i - 1], row_splits[2 * i - 1],
+                feature_weights[2 * i - 1]
             ])
         features = activation_fn(batch_norm_fn(features))
 
@@ -435,6 +474,7 @@ def generalized_semantic_segmenter(input_spec,
                                           flat_rel_coords[0],
                                           flat_node_indices[0],
                                           row_splits[0],
+                                          feature_weights[0],
                                           filters=filters,
                                           **bottleneck_kwargs)
     features = features + res_features.pop()
