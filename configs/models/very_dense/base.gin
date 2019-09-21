@@ -38,6 +38,7 @@ compute_edges_eager_fn.depth = %depth
 exponential_radii.r0 = 0.1
 
 get_base_node_network_factories.units_scale = %units_scale
+get_base_node_network_factories.num_factories = %depth
 get_base_extractor.units_scale = %units_scale
 
 depth = 4

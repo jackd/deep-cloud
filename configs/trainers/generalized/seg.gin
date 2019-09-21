@@ -1,0 +1,9 @@
+include '../../problems/partnet.gin'
+include '../../pipelines/pointnet2.gin'
+include '../../models/generalized/seg.gin'
+include '../../optimizers/adam-decay.gin'
+
+batch_size = 16
+epochs = 100
+
+name = 'generalized/base'

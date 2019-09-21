@@ -4,6 +4,6 @@ include '../../../pipelines/tweaks/pointnet2_mixin.gin'
 include '../../../problems/tweaks/pointnet2_mixin.gin'
 include '../../../models/tweaks/wd4e-5.gin'
 
-unit_scale = 8
+units_scale = 8
 repeats = 2
 name = 'princ'

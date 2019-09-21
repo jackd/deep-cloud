@@ -1,0 +1,18 @@
+import deep_cloud.models.generalized
+import deep_cloud.models.generalized.layers
+import deep_cloud.models.generalized.blocks
+include '../tweaks/wd4e-5.gin'
+
+pipeline = {
+    'train': @train/map_pipeline(),
+    'validation': @validation/map_pipeline(),
+}
+
+train/map_pipeline.pipeline = @train/Pipeline()
+validation/map_pipeline.pipeline = @validation/Pipeline()
+
+map_pipeline.map_fn = @pre_batch_map
+map_pipeline.post_batch_map_fn = @post_batch_map
+
+pre_batch_map.depth = %depth
+depth = 5

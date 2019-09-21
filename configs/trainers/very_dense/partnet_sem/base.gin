@@ -5,7 +5,7 @@ include '../../../optimizers/adam-decay.gin'
 
 batch_size = 8
 epochs = 100
-unit_scale = 4
+units_scale = 4
 repeats = 1
 
 name = 'base'

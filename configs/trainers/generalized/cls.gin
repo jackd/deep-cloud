@@ -1,0 +1,10 @@
+include '../../problems/pointnet2.gin'
+include '../../pipelines/pointnet2.gin'
+include '../../models/generalized/cls.gin'
+include '../../optimizers/adam-decay.gin'
+
+batch_size = 16
+epochs = 250
+
+name = 'generalized/base'
+model_dir = '~/deep-cloud-models/pointnet2/generalized/base'

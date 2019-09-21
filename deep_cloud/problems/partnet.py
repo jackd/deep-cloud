@@ -81,11 +81,16 @@ class PartnetProblem(TfdsProblem):
 
     def post_batch_map(self, labels, weights=None):
         labels = tf.reshape(labels, (-1,))
-        if weights is not None:
+        if weights is None:
+            weights = tf.cast(tf.not_equal(labels, 0), tf.float32)
+        else:
             if weights.shape.ndims == 1:
                 weights = tf.tile(tf.expand_dims(weights, axis=1),
                                   (1, tf.shape(labels)[1]))
             weights = tf.reshape(weights, (-1,))
+            weights = tf.where(tf.equal(labels, 0), tf.zeros_like(weights),
+                               weights)
+
         if self.repeated_outputs is not None:
             if weights is not None:
                 weights = (weights,) * (1 + self.repeated_outputs)

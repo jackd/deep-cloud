@@ -236,3 +236,41 @@ def _maybe_clip(ragged_lists, max_neighbors, default_max_neighbors):
     if max_neighbors is not None:
         ragged_lists = [rl[:max_neighbors] for rl in ragged_lists]
     return RaggedArray.from_ragged_lists(ragged_lists, dtype=np.int64)
+
+
+def rejection_sample_lazy(tree, points, radius, k0):
+    N = points.shape[0]
+    out = []
+    consumed = np.zeros((N,), dtype=np.bool)
+    for i in range(N):
+        if not consumed[i]:
+            out.append(i)
+            indices = tree.query_ball_point(np.expand_dims(points[i], 0),
+                                            radius,
+                                            approx_neighbors=k0)
+            indices = indices[0]
+            consumed[indices] = True
+    return out
+
+
+def rejection_sample_active(tree, points, radius, k0):
+    N = points.shape[0]
+    out = []
+    consumed = np.zeros((N,), dtype=np.bool)
+    indices = tree.query_ball_point(points, radius, approx_neighbors=k0)
+    for i in range(N):
+        if not consumed[i]:
+            consumed[indices[i]] = True
+            out.append(i)
+    return out
+
+
+def rejection_sample_precomputed(indices):
+    N = indices.leading_dim
+    consumed = np.zeros((N,), dtype=np.bool)
+    out = []
+    for i in range(N):
+        if not consumed[i]:
+            consumed[indices[i]] = True
+            out.append(i)
+    return out

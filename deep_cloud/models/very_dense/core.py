@@ -39,33 +39,6 @@ def exponential_radii(depth=4, r0=1., expansion_rate=2):
     return r0 * expansion_rate**np.arange(depth)
 
 
-def rejection_sample_lazy(tree, points, radius, k0):
-    N = points.shape[0]
-    out = []
-    consumed = np.zeros((N,), dtype=np.bool)
-    for i in range(N):
-        if not consumed[i]:
-            out.append(i)
-            indices = tree.query_ball_point(np.expand_dims(points[i], 0),
-                                            radius,
-                                            approx_neighbors=k0)
-            indices = indices[0]
-            consumed[indices] = True
-    return out
-
-
-def rejection_sample_active(tree, points, radius, k0):
-    N = points.shape[0]
-    out = []
-    consumed = np.zeros((N,), dtype=np.bool)
-    indices = tree.query_ball_point(points, radius, approx_neighbors=k0)
-    for i in range(N):
-        if not consumed[i]:
-            consumed[indices[i]] = True
-            out.append(i)
-    return out
-
-
 @gin.configurable
 def compute_edges_principled_eager_fn(depth=4, k0=16, tree_impl=DEFAULT_TREE):
     return functools.partial(
@@ -107,10 +80,10 @@ def compute_edges_principled_eager(coords,
     radii = 4 * np.power(2, np.arange(depth))
     ## Rejection sample on original cloud
     # for i, radius in enumerate(radii[:-1]):
-    #     indices = rejection_sample_lazy(base_tree,
-    #                                       base_coords,
-    #                                       radius,
-    #                                       k0=k0 * 4**i)
+    #     indices = core.rejection_sample_lazy(base_tree,
+    #                                          base_coords,
+    #                                          radius,
+    #                                          k0=k0 * 4**i)
     #     coords = base_coords[indices]
     #     tree = tree_impl(coords)
 
@@ -123,7 +96,7 @@ def compute_edges_principled_eager(coords,
     # Significantly faster, but not -all- top-level nodes will be in all
     # neighborhoords.
     for i, radius in enumerate(radii[:-1]):
-        indices = rejection_sample_active(tree, coords, radius, k0=k0)
+        indices = core.rejection_sample_active(tree, coords, radius, k0=k0)
         coords = coords[indices]
         tree = tree_impl(coords)
 
@@ -549,10 +522,20 @@ EmbeddingSpec = gin.external_configurable(
     collections.namedtuple('EmbeddingSpec', ['input_dim', 'output_dim']))
 
 
-def add_residual(inp, output, dense_factory=Dense):
-    if inp.shape[-1] != output.shape[-1]:
-        inp = dense_factory(output.shape[-1])(inp)
-    return tf.add_n([inp, output])
+def as_residual(inp, output_dim, dense_factory=Dense):
+    if inp.shape[-1] != output_dim:
+        inp = dense_factory(output_dim)(inp)
+    return inp
+
+
+def residual_output(original, previous, current, dense_factory):
+    terms = []
+    if original is not None:
+        original = as_residual(original, current.shape[-1], dense_factory)
+        terms.append(original)
+    terms.extend(previous)
+    terms.append(current)
+    return tf.add_n(terms)
 
 
 @gin.configurable(blacklist=['inputs'])
@@ -563,9 +546,10 @@ def very_dense_features(
         extractor_factory=extractors.get_base_extractor,
         node_network_factories=None,
         global_network_factory=get_base_global_network,
-        residual_global_features=False,
-        residual_node_features=False,
-        residual_edge_features=False,
+        residual_global_features=True,
+        residual_node_features=True,
+        residual_edge_features=True,
+        dense_residuals=True,
         reduction=tf.reduce_max,
         dense_factory=Dense,
 ):
@@ -602,6 +586,10 @@ def very_dense_features(
     all_edge_features = []
     all_global_features = []
 
+    orig_global_features = inp_global_features
+    orig_node_features = inp_node_features
+    orig_edge_features = inp_edge_features
+
     for i in range(repeats + 1):
         node_features, edge_features = extractor_factory(
             sizes, flat_node_indices, row_splits, outer_row_splits)(
@@ -626,6 +614,17 @@ def very_dense_features(
 
         node_features = tuple(node_features)
         edge_features = utils.ttuple(edge_features)
+
+        if residual_global_features:
+            global_features = residual_output()
+            terms = []
+            if inp_global_features is not None:
+                terms.append(
+                    as_residual(inp_global_features, global_features.shape[-1],
+                                dense_factory))
+            terms.extend(all_global_features)
+            terms.append(global_features)
+            global_features = tf.add_n(terms)
 
         if inp_global_features is not None and residual_global_features:
             global_features = add_residual(inp_global_features, global_features,
