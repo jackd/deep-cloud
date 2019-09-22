@@ -1,0 +1,3 @@
+import more_keras.losses.ciou
+mk.losses.ContinuousMeanIouLoss.from_logits = True
+PartnetProblem.loss = @mk.losses.ContinuousMeanIouLoss()

@@ -1,0 +1,3 @@
+include 'seg.gin'
+include '../../problems/tweaks/mean_iou_loss.gin'
+name = 'generalized/miou'

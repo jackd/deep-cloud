@@ -29,6 +29,7 @@ class PartnetProblem(TfdsProblem):
                  category='table',
                  objective=None,
                  repeated_outputs=None,
+                 loss=None,
                  inverse_density_weights=False):
         if inverse_density_weights:
             raise NotImplementedError('TODO')
@@ -36,8 +37,9 @@ class PartnetProblem(TfdsProblem):
         builder = partnet.Partnet(config=category, level=level)
         num_classes = builder.num_classes[level]
 
-        loss = tf.keras.losses.SparseCategoricalCrossentropy(
-            from_logits=True, reduction='sum_over_batch_size')
+        if loss is None:
+            loss = tf.keras.losses.SparseCategoricalCrossentropy(
+                from_logits=True, reduction='sum_over_batch_size')
         metrics = [
             # tf.keras.metrics.SparseCategoricalAccuracy(),
             ProbMeanIoU(num_classes=num_classes),
