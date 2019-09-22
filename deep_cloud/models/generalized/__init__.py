@@ -256,17 +256,21 @@ def _from_row_splits(args):
     return tf.RaggedTensor.from_row_splits(*args)
 
 
-def get_coord_features(rel_coords, order=2, tol=1e-4):
-    if order == 1:
-        coord_features = rel_coords
-    elif order == 2:
+def get_coord_features(rel_coords, order=2):
+    features = [
+        tf.ones(shape=(tf.shape(rel_coords)[0], 1), dtype=rel_coords.dtype)
+    ]
+    if order > 0:
+        features.append(rel_coords)
+    if order > 1:
         p2 = tf.square(rel_coords)
         x, y, z = tf.unstack(rel_coords, axis=-1)
         mixed = tf.stack([x * y, x * z, y * z], axis=-1)
-        coord_features = tf.concat([rel_coords, mixed, p2], axis=-1)
-    else:
+        features.append(mixed)
+        features.append(p2)
+    if order > 2:
         raise NotImplementedError()
-    return coord_features
+    return tf.concat(features, axis=-1)
 
 
 @gin.configurable(blacklist=['input_spec', 'output_spec'])
