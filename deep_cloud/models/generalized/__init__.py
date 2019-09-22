@@ -256,10 +256,12 @@ def _from_row_splits(args):
     return tf.RaggedTensor.from_row_splits(*args)
 
 
+def _ones(rel_coords):
+    return tf.ones(shape=(tf.shape(rel_coords)[0], 1), dtype=rel_coords.dtype)
+
+
 def get_coord_features(rel_coords, order=2):
-    features = [
-        tf.ones(shape=(tf.shape(rel_coords)[0], 1), dtype=rel_coords.dtype)
-    ]
+    features = [tf.keras.layers.Lambda(_ones)(rel_coords)]
     if order > 0:
         features.append(rel_coords)
     if order > 1:
@@ -280,8 +282,8 @@ def generalized_classifier(input_spec,
                            dense_factory=mk_layers.Dense,
                            batch_norm_impl=mk_layers.BatchNormalization,
                            activation='relu',
-                           filters0=32,
                            global_filters=(512, 256),
+                           filters0=32,
                            global_dropout_impl=None):
     batch_norm_fn = get_batch_norm(batch_norm_impl)
     activation_fn = get_activation(activation)
