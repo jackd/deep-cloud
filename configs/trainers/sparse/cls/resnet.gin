@@ -1,5 +1,5 @@
-include '../../../problems/pointnet.gin'
-include '../../../pipelines/pointnet.gin'
+include '../../../problems/pointnet2.gin'
+include '../../../pipelines/pointnet2.gin'
 include '../../../models/sparse/resnet/cls.gin'
 include '../../../optimizers/adam-decay.gin'
 
