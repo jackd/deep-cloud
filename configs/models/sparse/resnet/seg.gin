@@ -1,0 +1,2 @@
+include 'base.gin'
+model_fn = @semantic_segmenter

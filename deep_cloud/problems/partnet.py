@@ -21,6 +21,25 @@ def partnet_model_dir(base_dir='~/deep-cloud-models/partnet',
                         'run-{:02d}'.format(run))
 
 
+# class NoisyLoss(tf.keras.losses.Loss):
+
+#     def __init__(self, base):
+#         self._base = base
+#         super(NoisyLoss, self).__init__(name=base.name)
+
+#     def call(self, y_true, y_pred):
+#         value = self._base.call(y_true, y_pred)
+#         value = tf.Print(value, [
+#             'noisy_loss',
+#             tf.shape(y_true),
+#             tf.shape(y_pred),
+#             tf.shape(value),
+#             tf.reduce_min(y_true),
+#             tf.reduce_max(y_true)
+#         ])
+#         return value
+
+
 @gin.configurable
 class PartnetProblem(TfdsProblem):
 
@@ -40,6 +59,7 @@ class PartnetProblem(TfdsProblem):
         if loss is None:
             loss = tf.keras.losses.SparseCategoricalCrossentropy(
                 from_logits=True, reduction='sum_over_batch_size')
+            # loss = NoisyLoss(loss)
         metrics = [
             # tf.keras.metrics.SparseCategoricalAccuracy(),
             ProbMeanIoU(num_classes=num_classes),

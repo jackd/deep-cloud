@@ -260,16 +260,22 @@ def _ones(rel_coords):
     return tf.ones(shape=(tf.shape(rel_coords)[0], 1), dtype=rel_coords.dtype)
 
 
-def get_coord_features(rel_coords, order=2):
-    features = [tf.keras.layers.Lambda(_ones)(rel_coords)]
+@gin.configurable(blacklist=['rel_coords'])
+def get_coord_features(rel_coords,
+                       order=2,
+                       include_const=True,
+                       include_mixed=True):
+    if include_const:
+        features = [tf.keras.layers.Lambda(_ones)(rel_coords)]
+    else:
+        features = []
     if order > 0:
         features.append(rel_coords)
     if order > 1:
-        p2 = tf.square(rel_coords)
-        x, y, z = tf.unstack(rel_coords, axis=-1)
-        mixed = tf.stack([x * y, x * z, y * z], axis=-1)
-        features.append(mixed)
-        features.append(p2)
+        if include_mixed:
+            x, y, z = tf.unstack(rel_coords, axis=-1)
+            features.append(tf.stack([x * y, x * z, y * z], axis=-1))
+        features.append(tf.square(rel_coords))
     if order > 2:
         raise NotImplementedError()
     return tf.concat(features, axis=-1)
@@ -278,7 +284,7 @@ def get_coord_features(rel_coords, order=2):
 @gin.configurable(blacklist=['input_spec', 'output_spec'])
 def generalized_classifier(input_spec,
                            output_spec,
-                           coord_order=2,
+                           coord_features_fn=get_coord_features,
                            dense_factory=mk_layers.Dense,
                            batch_norm_impl=mk_layers.BatchNormalization,
                            activation='relu',
@@ -319,8 +325,7 @@ def generalized_classifier(input_spec,
     # del outer_row_splits
 
     depth = len(all_coords)
-    coord_features = tuple(
-        get_coord_features(rc, order=coord_order) for rc in flat_rel_coords)
+    coord_features = tuple(coord_features_fn(rc) for rc in flat_rel_coords)
     features = inputs.get('normals')
 
     filters = filters0
@@ -494,7 +499,6 @@ def generalized_semantic_segmenter(input_spec,
 
 if __name__ == '__main__':
     from deep_cloud.problems.partnet import PartnetProblem
-    from deep_cloud.ops.np_utils.tree_utils import pykd
     tf.compat.v1.enable_v2_tensorshape()
     # tf.compat.v1.enable_eager_execution()
     problem = PartnetProblem()

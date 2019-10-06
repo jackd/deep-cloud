@@ -1,0 +1,20 @@
+import deep_cloud.models.sparse.resnet
+import deep_cloud.models.sparse.preprocess
+
+resnet_features.filter_scale_factor = %filter_scale_factor
+get_nd_polynomials.base_builder = %poly
+
+poly = 'geo'
+filter_scale_factor = 1
+
+# preprocessing
+pipeline = {
+    'train': @train/map_pipeline(),
+    'validation': @validation/map_pipeline(),
+}
+
+train/map_pipeline.pipeline = @train/Pipeline()
+validation/map_pipeline.pipeline = @validation/Pipeline()
+
+map_pipeline.map_fn = @pre_batch_map
+map_pipeline.post_batch_map_fn = @post_batch_map

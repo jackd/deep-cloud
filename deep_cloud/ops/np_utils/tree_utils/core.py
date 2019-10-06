@@ -254,15 +254,8 @@ def rejection_sample_lazy(tree, points, radius, k0):
 
 
 def rejection_sample_active(tree, points, radius, k0):
-    N = points.shape[0]
-    out = []
-    consumed = np.zeros((N,), dtype=np.bool)
-    indices = tree.query_ball_point(points, radius, approx_neighbors=k0)
-    for i in range(N):
-        if not consumed[i]:
-            consumed[indices[i]] = True
-            out.append(i)
-    return out
+    return rejection_sample_precomputed(
+        tree.query_ball_point(points, radius, approx_neighbors=k0))
 
 
 def rejection_sample_precomputed(indices):
