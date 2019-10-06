@@ -276,10 +276,55 @@ def semantic_segmenter_logits(inputs, num_classes, features_fn=resnet_features):
     return logits
 
 
+def _from_row_splits(args):
+    values, row_splits = args
+    return tf.RaggedTensor.from_row_splits(values, row_splits)
+
+
+@gin.configurable(blacklist=['x'])
+def mlp(x, units=(512, 256), dropout_rate=0.4):
+    for i, u in enumerate(units):
+        x = Dense(u, name='mlp_{}_dense'.format(i))(x)
+        x = BatchNormalization(name='mlp_{}_bn'.format(i))(x)
+        x = Activation('relu', name='mlp_{}_relu'.format(i))(x)
+        if dropout_rate is not None:
+            x = tf.keras.layers.Dropout(dropout_rate)(x)
+    return x
+
+
+@gin.configurable(blacklist=['inputs', 'num_classes'])
+def classifier_logits(inputs,
+                      num_classes,
+                      features_fn=resnet_features,
+                      final_node_units=1024,
+                      mlp_fn=mlp):
+    (sample_indices, in_place_indices, in_place_rel_coords, down_sample_indices,
+     down_sample_rel_coords,
+     row_splits) = (inputs.get(k)
+                    for k in ('sample_indices', 'in_place_indices',
+                              'in_place_rel_coords', 'down_sample_indices',
+                              'down_sample_rel_coords', 'row_splits'))
+    (out_features, in_place_edge_features, in_place_weights,
+     down_sample_edge_features, down_sample_weights) = features_fn(
+         sample_indices, in_place_rel_coords, in_place_indices,
+         down_sample_rel_coords, down_sample_indices)
+    del (in_place_edge_features, in_place_weights, down_sample_edge_features,
+         down_sample_weights)
+    features = out_features[-1]
+    features = Dense(final_node_units, name='node_final_dense')(features)
+    features = BatchNormalization(name='node_final_bn')(features)
+    from_row_splits = tf.keras.layers.Lambda(_from_row_splits)
+    features = tf.nest.map_structure(lambda *args: from_row_splits(args),
+                                     features, row_splits[-1])
+    features = tf.reduce_max(features, axis=1)
+    features = Activation('relu', name='node_final_relu')(features)
+    features = mlp_fn(features)
+    logits = Dense(num_classes, name='logits')(features)
+    return logits
+
+
 @gin.configurable(blacklist=['input_spec', 'output_spec'])
-def semantic_segmenter(input_spec,
-                       output_spec,
-                       logits_fn=semantic_segmenter_logits):
+def resnet_model(input_spec, output_spec, logits_fn=semantic_segmenter_logits):
     from more_keras import spec
     inputs = spec.inputs(input_spec)
     logits = logits_fn(inputs, output_spec.shape[-1])
@@ -320,7 +365,7 @@ if __name__ == '__main__':
 
     input_spec = dataset.element_spec[0]
     output_spec = problem.output_spec
-    model = semantic_segmenter(input_spec, output_spec)
+    model = resnet_model(input_spec, output_spec)
     args = tf.compat.v1.data.make_one_shot_iterator(dataset).get_next()
     if len(args) == 3:
         inputs, labels, weights = args

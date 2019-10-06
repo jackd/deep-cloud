@@ -115,7 +115,7 @@ def _flatten_output(fn, *args, **kwargs):
 def pre_batch_map(features,
                   labels,
                   weights=None,
-                  depth=5,
+                  depth=6,
                   shuffle=True,
                   edge_fn=None):
     if isinstance(features, dict):
@@ -176,7 +176,11 @@ def pre_batch_map(features,
 
 
 @gin.configurable(blacklist=['features', 'labels', 'weights'])
-def post_batch_map(features, labels, weights=None, return_coords=False):
+def post_batch_map(features,
+                   labels,
+                   weights=None,
+                   return_coords=False,
+                   return_up_sample_inputs=True):
     all_coords, rel_coords, node_indices, sample_indices = (
         features[k]
         for k in ('all_coords', 'rel_coords', 'node_indices', 'sample_indices'))
@@ -247,11 +251,13 @@ def post_batch_map(features, labels, weights=None, return_coords=False):
         in_place_rel_coords=in_place_rel_coords,
         down_sample_indices=down_sample_indices,
         down_sample_rel_coords=down_sample_rel_coords,
-        up_sample_indices=up_sample_indices,
-        up_sample_perms=up_sample_perms,
         row_splits=row_splits,
         # edge_weights=edge_weights,
     )
+    if return_up_sample_inputs:
+        features['up_sample_indices'] = up_sample_indices
+        features['up_sample_perms'] = up_sample_perms
+
     if return_coords:
         features['all_coords'] = all_coords
 

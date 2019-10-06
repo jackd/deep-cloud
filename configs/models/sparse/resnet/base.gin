@@ -7,6 +7,8 @@ get_nd_polynomials.base_builder = %poly
 poly = 'geo'
 filter_scale_factor = 1
 
+model_fn = @resnet_model
+
 # preprocessing
 pipeline = {
     'train': @train/map_pipeline(),
@@ -18,3 +20,5 @@ validation/map_pipeline.pipeline = @validation/Pipeline()
 
 map_pipeline.map_fn = @pre_batch_map
 map_pipeline.post_batch_map_fn = @post_batch_map
+
+pre_batch_map.depth = %depth

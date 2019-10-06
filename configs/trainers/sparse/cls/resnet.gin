@@ -1,0 +1,10 @@
+include '../../../problems/pointnet.gin'
+include '../../../pipelines/pointnet.gin'
+include '../../../models/sparse/resnet/cls.gin'
+include '../../../optimizers/adam-decay.gin'
+
+batch_size = 16
+positions_only = False
+epochs = 250
+
+model_dir = '~/deep-cloud-models/pointnet2/sparse/resnet'
