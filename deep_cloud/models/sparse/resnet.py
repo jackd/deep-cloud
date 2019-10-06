@@ -313,10 +313,10 @@ def classifier_logits(inputs,
     features = out_features[-1]
     features = Dense(final_node_units, name='node_final_dense')(features)
     features = BatchNormalization(name='node_final_bn')(features)
-    from_row_splits = tf.keras.layers.Lambda(_from_row_splits)
-    features = tf.nest.map_structure(lambda *args: from_row_splits(args),
-                                     features, row_splits[-1])
-    features = tf.reduce_max(features, axis=1)
+    features = tf.keras.layers.Lambda(_from_row_splits)(
+        [features, row_splits[-1]])
+    features = tf.keras.layers.Lambda(tf.reduce_max,
+                                      arguments=dict(axis=1))(features)
     features = Activation('relu', name='node_final_relu')(features)
     features = mlp_fn(features)
     logits = Dense(num_classes, name='logits')(features)
