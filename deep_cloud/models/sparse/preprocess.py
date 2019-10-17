@@ -235,6 +235,8 @@ def post_batch_map(features,
     down_sample_rel_coords = flat_rel_coords[::2]
     in_place_rel_coords = flat_rel_coords[1::2]
 
+    all_coords = tf.nest.map_structure(lambda x: x.flat_values, all_coords)
+
     assert (len(all_coords) == depth)
     assert (len(sample_indices) == depth - 1)
     assert (len(in_place_indices) == depth - 1)
@@ -334,16 +336,13 @@ if __name__ == '__main__':
     import functools
     from deep_cloud.problems.partnet import PartnetProblem
     import tqdm
-    tf.compat.v1.enable_eager_execution()
-    tf.config.experimental_run_functions_eagerly(True)
-    split = 'train'
-    batch_size = 16
-    # batch_size = 2
-    num_warmup = 5
-    num_batches = 10
-    problem = PartnetProblem()
 
     def run_explicit():
+        tf.compat.v1.enable_eager_execution()
+        tf.config.experimental_run_functions_eagerly(True)
+        split = 'train'
+        batch_size = 16
+        problem = PartnetProblem()
         with problem:
             dataset = problem.get_base_dataset(split).map(pre_batch_map, -1)
             dataset = dataset.batch(batch_size)
@@ -354,6 +353,11 @@ if __name__ == '__main__':
         print('Finished single run of explicit post_batch_map')
 
     def run_benchmark():
+        split = 'train'
+        batch_size = 16
+        num_warmup = 5
+        num_batches = 10
+        problem = PartnetProblem()
         with problem:
             dataset = problem.get_base_dataset(split).map(pre_batch_map, -1)
             dataset = dataset.batch(batch_size)
@@ -371,5 +375,58 @@ if __name__ == '__main__':
         print('{} batches in {} s: {} ms / batch'.format(
             num_batches, dt, dt * 1000 / num_batches))
 
+    def vis():
+        import numpy as np
+        import trimesh
+        tf.compat.v1.enable_eager_execution()
+        split = 'train'
+        batch_size = 2
+        problem = PartnetProblem()
+        with problem:
+            dataset = problem.get_base_dataset(split).map(pre_batch_map, -1)
+            dataset = dataset.batch(batch_size)
+            dataset = dataset.map(
+                functools.partial(post_batch_map, return_coords=True))
+
+        for features, labels, weights in dataset:
+            del labels, weights
+
+            def vis_clouds(in_coords, out_coords, target_index, neighbors):
+                out_colors = np.ones((out_coords.shape[0], 3), dtype=np.uint8)
+                out_colors *= 128
+                out_colors[target_index] = [0, 255, 0]
+                out_cloud = trimesh.PointCloud(out_coords, out_colors)
+                in_colors = np.zeros((in_coords.shape[0], 3), dtype=np.uint8)
+
+                in_colors[:, 2] = 255
+                neigh_indices = neighbors[neighbors[:, 0] == target_index, 1]
+                in_colors[neigh_indices] = [255, 0, 0]
+                in_cloud = trimesh.PointCloud(in_coords, in_colors)
+
+                scene = in_cloud.scene()
+                scene.add_geometry(out_cloud)
+                scene.show(background=(0, 0, 0))
+
+            features = tf.nest.map_structure(lambda x: x.numpy(), features)
+            all_coords = features['all_coords']
+            # sample_indices = features['sample_indices']
+            in_place_indices = features['in_place_indices']
+            in_place_rel_coords = features['in_place_rel_coords']
+            down_sample_indices = features['down_sample_indices']
+            down_sample_rel_coords = features['down_sample_rel_coords']
+            row_splits = features['row_splits']
+            depth = len(all_coords)
+
+            for i in range(depth - 1):
+                # down sample
+                print(np.max(np.linalg.norm(down_sample_rel_coords[i], axis=0)))
+                print(np.max(np.linalg.norm(in_place_rel_coords[i], axis=0)))
+                vis_clouds(all_coords[i], all_coords[i + 1],
+                           row_splits[i + 1][-2], down_sample_indices[i])
+                # in place
+                vis_clouds(all_coords[i + 1], all_coords[i + 1],
+                           row_splits[i + 1][-2], in_place_indices[i])
+
     # run_benchmark()
-    run_explicit()
+    # run_explicit()
+    vis()
