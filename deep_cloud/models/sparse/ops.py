@@ -6,16 +6,38 @@ import tensorflow as tf
 
 
 def featureless_conv(kernel, sparse_indices, edge_weights):
-    if sparse_indices.shape.ndims == 1:
-        i = sparse_indices
-    else:
-        assert (sparse_indices.shape.ndims == 2)
-        assert (sparse_indices.shape[1] == 2)
-        i = sparse_indices[:, 0]
-    # edge_weights are [K, E] everywhere else in this module
-    edge_weights = tf.transpose(edge_weights, (1, 0))  # [E, K]
-    neigh_sum = tf.math.segment_sum(edge_weights, i)  # [N, K]
-    return tf.matmul(neigh_sum, kernel)  # [N, F_out]
+    """
+    Compute a point cloud convolution when there are no input features.
+
+    Equivalent to
+
+    out_{ip} = \\sum_{j, k} n^{(k)}_{ij}^{(k)} \\theta^{(k)}_p.
+
+    Args:
+        kernel: [K, F_out] float tensor.
+        sparse_indices: [E, 2] int64 tensor of sparse indices for a sparse
+            tensor with dense shape [N_out, N_in], or [E] int64 tensor
+            corresponding to the first index (i.e. in [0, N_out)).
+        edge_weights: [K, E] float tensor of edge weights.
+
+    Returns:
+        [N_out, F_out] node features.
+    """
+    with tf.name_scope('featureless_conv'):
+        kernel = tf.convert_to_tensor(kernel, dtype_hint=tf.float32)
+        sparse_indices = tf.convert_to_tensor(sparse_indices,
+                                              dtype_hint=tf.int64)
+        edge_weights = tf.convert_to_tensor(edge_weights, dtype_hint=tf.float32)
+        if sparse_indices.shape.ndims == 1:
+            i = sparse_indices
+        else:
+            assert (sparse_indices.shape.ndims == 2)
+            assert (sparse_indices.shape[1] == 2)
+            i = sparse_indices[:, 0]
+        # edge_weights are [K, E] everywhere else in this module
+        edge_weights = tf.transpose(edge_weights, (1, 0))  # [E, K]
+        neigh_sum = tf.math.segment_sum(edge_weights, i)  # [N, K]
+        return tf.matmul(neigh_sum, kernel)  # [N, F_out]
 
 
 def get_sparse_transform(sparse_indices, dense_shape):

@@ -198,7 +198,6 @@ class KDTree(object):
 
         invalid = row_lengths == approx_neighbors
         invalid_indices, = np.where(invalid)
-
         extra_indices, extra_mask = self._query_ball_point_recursive(
             x[invalid_indices], r, 2 * approx_neighbors)
         k = extra_indices.shape[1]
